@@ -853,6 +853,8 @@ class VideoPlayer {
     async play(channel, streamUrl) {
         this.currentChannel = channel;
 
+        window.app?.onStreamStart?.();
+
         try {
             // Stop any WatchPage playback (movies/series) before starting Live TV
             window.app?.pages?.watch?.stop?.();
@@ -1409,6 +1411,8 @@ class VideoPlayer {
         this.currentStreamInfo = null;
         const badge = document.getElementById('player-quality-badge');
         if (badge) badge.classList.add('hidden');
+
+        window.app?.onStreamStop?.();
     }
 
     /**

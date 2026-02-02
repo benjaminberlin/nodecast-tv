@@ -166,6 +166,15 @@ const API = {
         create: (data) => API.request('POST', '/auth/users', data),
         update: (id, data) => API.request('PUT', `/auth/users/${id}`, data),
         delete: (id) => API.request('DELETE', `/auth/users/${id}`)
+    },
+
+    // Passes / Account
+    pass: {
+        redeem: (plan) => API.request('POST', '/auth/pass/redeem', { plan })
+    },
+
+    account: {
+        changePassword: (currentPassword, newPassword) => API.request('POST', '/auth/change-password', { currentPassword, newPassword })
     }
 };
 

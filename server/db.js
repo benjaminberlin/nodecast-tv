@@ -398,6 +398,11 @@ const users = {
       role: userData.role || 'viewer',
       oidcId: userData.oidcId || null,
       email: userData.email || null,
+      showMovies: !!userData.showMovies,
+      showSeries: !!userData.showSeries,
+      coins: typeof userData.coins === 'number' ? userData.coins : 0,
+      passExpiresAt: userData.passExpiresAt || null,
+      lastOnline: userData.lastOnline || null,
       createdAt: new Date().toISOString()
     };
 

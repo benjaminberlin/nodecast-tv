@@ -37,8 +37,13 @@ router.get('/oidc/login', auth.passport.authenticate('openidconnect'));
  */
 router.get('/oidc/callback',
     auth.passport.authenticate('openidconnect', { session: false, failureRedirect: '/login.html?error=SSO+Failed' }),
-    (req, res) => {
+    async (req, res) => {
         // Successful authentication
+        try {
+            await db.users.update(req.user.id, { lastOnline: new Date().toISOString() });
+        } catch (err) {
+            console.warn('Failed to update lastOnline for OIDC user:', err.message);
+        }
         const token = auth.generateToken(req.user);
 
         // Redirect to hompage with token
@@ -88,7 +93,8 @@ router.post('/setup', async (req, res) => {
         const adminUser = await db.users.create({
             username,
             passwordHash,
-            role: 'admin'
+            role: 'admin',
+            lastOnline: new Date().toISOString()
         });
 
         // Generate token for immediate login
@@ -110,7 +116,7 @@ router.post('/setup', async (req, res) => {
  * POST /api/auth/login
  */
 router.post('/login', (req, res, next) => {
-    auth.passport.authenticate('local', { session: false }, (err, user, info) => {
+    auth.passport.authenticate('local', { session: false }, async (err, user, info) => {
         if (err) {
             console.error('Login error:', err);
             return res.status(500).json({ error: 'Server error' });
@@ -118,6 +124,12 @@ router.post('/login', (req, res, next) => {
 
         if (!user) {
             return res.status(401).json({ error: info?.message || 'Invalid credentials' });
+        }
+
+        try {
+            await db.users.update(user.id, { lastOnline: new Date().toISOString() });
+        } catch (updateErr) {
+            console.warn('Failed to update lastOnline on login:', updateErr.message);
         }
 
         // Generate JWT token
@@ -156,10 +168,20 @@ router.get('/me', auth.requireAuth, async (req, res) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
+        try {
+            await db.users.update(req.user.id, { lastOnline: new Date().toISOString() });
+        } catch (updateErr) {
+            console.warn('Failed to update lastOnline on /me:', updateErr.message);
+        }
+
         res.json({
             id: user.id,
             username: user.username,
-            role: user.role
+            role: user.role,
+            showMovies: !!user.showMovies,
+            showSeries: !!user.showSeries,
+            coins: typeof user.coins === 'number' ? user.coins : 0,
+            passExpiresAt: user.passExpiresAt || null
         });
     } catch (err) {
         console.error('Error in /me:', err);
@@ -229,7 +251,7 @@ router.post('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
 router.put('/users/:id', auth.requireAuth, auth.requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;
-        const { username, password, role } = req.body;
+        const { username, password, role, showMovies, showSeries, coins, coinsDelta } = req.body;
 
         const updates = {};
 
@@ -262,10 +284,117 @@ router.put('/users/:id', auth.requireAuth, auth.requireAdmin, async (req, res) =
             updates.role = role;
         }
 
+        if (typeof showMovies === 'boolean') {
+            updates.showMovies = showMovies;
+        }
+
+        if (typeof showSeries === 'boolean') {
+            updates.showSeries = showSeries;
+        }
+
+        if (typeof coins === 'number' && Number.isFinite(coins)) {
+            updates.coins = Math.max(0, Math.floor(coins));
+        }
+
+        if (typeof coinsDelta === 'number' && Number.isFinite(coinsDelta)) {
+            const user = await db.users.getById(id);
+            if (!user) {
+                return res.status(404).json({ error: 'User not found' });
+            }
+            const currentCoins = typeof user.coins === 'number' ? user.coins : 0;
+            updates.coins = Math.max(0, currentCoins + Math.trunc(coinsDelta));
+        }
+
         const updatedUser = await db.users.update(id, updates);
         res.json(updatedUser);
     } catch (err) {
         console.error('Error updating user:', err);
+        res.status(500).json({ error: err.message || 'Server error' });
+    }
+});
+
+/**
+ * Redeem pass (user)
+ * POST /api/auth/pass/redeem
+ */
+router.post('/pass/redeem', auth.requireAuth, async (req, res) => {
+    try {
+        const { plan } = req.body;
+
+        const plans = {
+            '24h': { cost: 1, durationMs: 24 * 60 * 60 * 1000 },
+            '7d': { cost: 3, durationMs: 7 * 24 * 60 * 60 * 1000 },
+            '30d': { cost: 5, durationMs: 30 * 24 * 60 * 60 * 1000 }
+        };
+
+        if (!plans[plan]) {
+            return res.status(400).json({ error: 'Invalid plan' });
+        }
+
+        const user = await db.users.getById(req.user.id);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const currentCoins = typeof user.coins === 'number' ? user.coins : 0;
+        const { cost, durationMs } = plans[plan];
+
+        if (currentCoins < cost) {
+            return res.status(400).json({ error: 'Not enough coins' });
+        }
+
+        const now = Date.now();
+        const existingExpiry = user.passExpiresAt ? new Date(user.passExpiresAt).getTime() : 0;
+        const base = existingExpiry > now ? existingExpiry : now;
+        const newExpiry = new Date(base + durationMs).toISOString();
+
+        const updatedUser = await db.users.update(user.id, {
+            coins: currentCoins - cost,
+            passExpiresAt: newExpiry
+        });
+
+        res.json({
+            coins: typeof updatedUser.coins === 'number' ? updatedUser.coins : 0,
+            passExpiresAt: updatedUser.passExpiresAt || null
+        });
+    } catch (err) {
+        console.error('Error redeeming pass:', err);
+        res.status(500).json({ error: err.message || 'Server error' });
+    }
+});
+
+/**
+ * Change password (user)
+ * POST /api/auth/change-password
+ */
+router.post('/change-password', auth.requireAuth, async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: 'Current and new password are required' });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        }
+
+        const user = await db.users.getById(req.user.id);
+        if (!user || !user.passwordHash) {
+            return res.status(400).json({ error: 'Password change not available for this account' });
+        }
+
+        const isValid = await auth.verifyPassword(currentPassword, user.passwordHash);
+        if (!isValid) {
+            return res.status(401).json({ error: 'Current password is incorrect' });
+        }
+
+        const passwordHash = await auth.hashPassword(newPassword);
+        await db.users.update(user.id, { passwordHash });
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Error changing password:', err);
         res.status(500).json({ error: err.message || 'Server error' });
     }
 });

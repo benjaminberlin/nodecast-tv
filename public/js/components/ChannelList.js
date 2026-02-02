@@ -1155,6 +1155,15 @@ class ChannelList {
             }
         }
 
+        if (window.app && !window.app.hasActivePass()) {
+            window.app.pendingChannelDataset = dataset;
+            window.app.showPassOverlay({
+                title: 'Kein aktiver Pass',
+                message: 'Du brauchst einen aktiven Pass, um diesen Stream zu starten.'
+            });
+            return;
+        }
+
         // Get stream URL
         let streamUrl;
         if (channel.sourceType === 'xtream') {

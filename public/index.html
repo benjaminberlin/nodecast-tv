@@ -23,15 +23,6 @@
   <div id="app">
     <!-- Navigation -->
     <nav class="navbar">
-      <div class="navbar-brand">
-        <span class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 187.63 210.6" fill="#6366f1"
-            class="icon">
-            <path
-              d="M169.71,87.87c-4.77,0-9.1,1.88-12.31,4.92L35.3,22.3c.35-1.4.56-2.86.56-4.37C35.86,8.03,27.83,0,17.93,0S0,8.03,0,17.93c0,8.44,5.84,15.5,13.69,17.4v140c-7.71,2.01-13.41,8.99-13.41,17.33,0,9.9,8.03,17.93,17.93,17.93s17.93-8.03,17.93-17.93c0-1.56-.22-3.07-.6-4.51l121.21-69.98c3.26,3.42,7.86,5.55,12.95,5.55,9.9,0,17.93-8.03,17.93-17.93s-8.03-17.93-17.93-17.93ZM152.78,99.92c-.14.41-.27.83-.38,1.25h-51.47l-44.18-24.72L30.4,30.8c.33-.32.64-.65.94-.99l121.45,70.12ZM22.17,175.2V35.33c.23-.05.45-.11.67-.17l26.35,45.65-.34,50.04-25.74,44.59c-.31-.09-.63-.17-.95-.24ZM31.52,180.69c-.27-.3-.55-.6-.84-.89l25.48-44.13,44.64-25.78h51.47c.07.32.15.63.24.94L31.52,180.69Z" />
-          </svg></span>
-        <span class="brand-text">nodecast-tv</span>
-        <span id="version-badge" class="version-badge"></span>
-      </div>
       <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="Toggle menu">
         <span></span>
         <span></span>
@@ -42,13 +33,6 @@
         <a href="#" class="now-playing-indicator hidden" id="now-playing-indicator" data-page="watch">
           <span class="now-playing-icon">▶</span>
           <span class="now-playing-text" id="now-playing-text">Now Playing</span>
-        </a>
-        <a href="#" class="nav-link active" data-page="home">
-          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
-              class="icon">
-              <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
-            </svg></span>
-          <span>Home</span>
         </a>
         <a href="#" class="nav-link" data-page="live">
           <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
@@ -64,6 +48,13 @@
               <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z" />
             </svg></span>
           <span>TV Guide</span>
+        </a>
+        <a href="#" class="nav-link" data-page="account">
+          <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+              class="icon">
+              <path d="M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5z" />
+            </svg></span>
+          <span>Account</span>
         </a>
         <a href="#" class="nav-link" data-page="movies">
           <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
@@ -161,6 +152,22 @@
           <section class="player-section">
             <div class="video-container" id="video-container">
               <video id="video-player" playsinline></video>
+
+              <div class="pass-overlay hidden" id="pass-overlay">
+                <div class="pass-overlay-card">
+                  <div class="pass-overlay-header">
+                    <h3 id="pass-overlay-title">Kein aktiver Pass</h3>
+                    <button class="pass-overlay-close" id="pass-overlay-close" aria-label="Schließen">&times;</button>
+                  </div>
+                  <p id="pass-overlay-message">Du brauchst einen aktiven Pass, um Streams zu starten.</p>
+                  <div class="pass-overlay-coins">Verfügbare Coins: <strong id="pass-overlay-coins">0</strong></div>
+                  <div class="pass-overlay-actions">
+                    <button class="btn btn-primary pass-option" data-plan="24h">24 Stunden · 1 Coin</button>
+                    <button class="btn btn-secondary pass-option" data-plan="7d">7 Tage · 3 Coins</button>
+                    <button class="btn btn-secondary pass-option" data-plan="30d">30 Tage · 5 Coins</button>
+                  </div>
+                </div>
+              </div>
 
               <!-- Custom Controls Overlay -->
               <div class="watch-overlay hidden" id="player-controls-overlay">
@@ -308,6 +315,61 @@
           <div class="empty-state">
             <p>No EPG data available</p>
             <p class="hint">Add an EPG source in Settings</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Account Page -->
+      <div id="page-account" class="page">
+        <div class="account-container">
+          <h2>Account</h2>
+
+          <div class="account-card">
+            <h3>Restzeit</h3>
+            <p class="hint">Dein Zugang endet nach Ablauf der Zeit. Es gibt keine automatische Verlängerung.</p>
+            <div class="account-pill">
+              <div>Restzeit: <strong id="account-pass-remaining">—</strong></div>
+              <div>gültig bis: <strong id="account-pass-until">—</strong></div>
+            </div>
+          </div>
+
+          <div class="account-card">
+            <h3>Verfügbare Coins</h3>
+            <div class="account-coins" id="account-coins">0</div>
+          </div>
+
+          <div class="account-card">
+            <h3>Pass verlängern</h3>
+            <p class="hint">Einlösen verlängert deinen Zugang zusätzlich zur aktuellen Restzeit.</p>
+            <div class="account-pass-actions">
+              <button class="btn btn-secondary pass-option" data-plan="24h">24 Stunden <span>1 Coin</span></button>
+              <button class="btn btn-secondary pass-option" data-plan="7d">7 Tage <span>3 Coins</span></button>
+              <button class="btn btn-secondary pass-option" data-plan="30d">30 Tage <span>5 Coins</span></button>
+            </div>
+            <p class="hint" id="account-pass-hint"> </p>
+          </div>
+
+          <div class="account-card">
+            <button class="account-collapse-btn" id="account-coin-history-toggle">Coin-Historie</button>
+            <div class="account-coin-history hidden" id="account-coin-history">
+              <p class="hint">Noch keine Einträge.</p>
+            </div>
+          </div>
+
+          <div class="account-card">
+            <h3>Passwort ändern</h3>
+            <form id="account-password-form" class="account-form">
+              <label for="account-current-password">Aktuelles Passwort</label>
+              <input type="password" id="account-current-password" class="form-input" required>
+
+              <label for="account-new-password">Neues Passwort</label>
+              <input type="password" id="account-new-password" class="form-input" required minlength="6">
+
+              <label for="account-new-password-confirm">Neues Passwort bestätigen</label>
+              <input type="password" id="account-new-password-confirm" class="form-input" required minlength="6">
+
+              <button type="submit" class="btn btn-primary">Passwort ändern</button>
+            </form>
           </div>
         </div>
       </div>
@@ -772,16 +834,20 @@
                 <table class="user-table">
                   <thead>
                     <tr>
-                      <th>Username</th>
-                      <th>Email</th>
-                      <th>Role</th>
+                      <th class="sortable" data-sort="online">Online</th>
+                      <th class="sortable" data-sort="username">Username</th>
+                      <th class="sortable" data-sort="coins">Coin</th>
+                      <th class="sortable" data-sort="lastOnline">Last Online</th>
+                      <th class="sortable" data-sort="passValid">Pass gültig bis</th>
+                      <th>Movies</th>
+                      <th>Series</th>
                       <th>Created</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody id="user-list">
                     <tr>
-                      <td colspan="4" class="hint">Loading users...</td>
+                      <td colspan="9" class="hint">Loading users...</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1101,7 +1167,6 @@
   <script src="/js/components/ChannelList.js?v=3"></script>
   <script src="/js/components/SourceManager.js?v=2"></script>
   <script src="/js/components/EpgGuide.js?v=2"></script>
-  <script src="/js/pages/HomePage.js?v=2"></script>
   <script src="/js/pages/LivePage.js?v=2"></script>
   <script src="/js/pages/Guide.js?v=2"></script>
   <script src="/js/pages/MoviesPage.js?v=4"></script>

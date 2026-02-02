@@ -4,9 +4,12 @@
 
 class App {
     constructor() {
-        this.currentPage = 'home';
+        this.currentPage = 'live';
         this.pages = {};
         this.currentUser = null;
+        this.passTimers = {};
+        this.pendingChannelDataset = null;
+        this.pendingWatchPayload = null;
 
         // Initialize components
         this.player = new VideoPlayer();
@@ -15,7 +18,6 @@ class App {
         this.epgGuide = new EpgGuide();
 
         // Initialize page controllers
-        this.pages.home = new HomePage(this);
         this.pages.live = new LivePage(this);
         this.pages.guide = new GuidePage(this);
         this.pages.movies = new MoviesPage(this);
@@ -29,6 +31,8 @@ class App {
     async init() {
         // Check authentication first
         await this.checkAuth();
+
+        this.initPassUi();
 
         // Mobile menu toggle
         const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
@@ -143,12 +147,9 @@ class App {
 
         // Handle browser back/forward buttons
         window.addEventListener('popstate', (e) => {
-            const page = e.state?.page || 'home';
+            const page = e.state?.page || 'live';
             this.navigateTo(page, false); // false = don't add to history
         });
-
-        // Initialize home page first (it's needed for channel list)
-        await this.pages.home.init();
 
         // Preload EPG data in background (non-blocking)
         // This ensures EPG info is available on Live TV page without visiting Guide first
@@ -158,7 +159,7 @@ class App {
 
         // Navigate to the page from URL hash, or default to home
         const hash = window.location.hash.slice(1); // Remove #
-        const initialPage = hash && this.pages[hash] ? hash : 'home';
+        const initialPage = hash && document.getElementById(`page-${hash}`) ? hash : 'live';
         this.navigateTo(initialPage, true); // true = replace history (don't add)
 
         console.log('NodeCast TV initialized');
@@ -195,14 +196,224 @@ class App {
                 }
             }
 
+            this.applyContentVisibility();
+
             // Add logout button to navbar
             this.addLogoutButton();
+
+            this.updateAccountSection();
 
         } catch (err) {
             console.error('Authentication error:', err);
             localStorage.removeItem('authToken');
             window.location.replace('/login.html');
         }
+    }
+
+    initPassUi() {
+        const overlayClose = document.getElementById('pass-overlay-close');
+        overlayClose?.addEventListener('click', () => this.hidePassOverlay());
+
+        document.querySelectorAll('.pass-option').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const plan = btn.dataset.plan;
+                if (!plan) return;
+                await this.redeemPass(plan);
+            });
+        });
+
+        const historyToggle = document.getElementById('account-coin-history-toggle');
+        const historyPanel = document.getElementById('account-coin-history');
+        historyToggle?.addEventListener('click', () => {
+            historyPanel?.classList.toggle('hidden');
+        });
+
+        const passwordForm = document.getElementById('account-password-form');
+        if (passwordForm) {
+            passwordForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                const currentPassword = document.getElementById('account-current-password')?.value;
+                const newPassword = document.getElementById('account-new-password')?.value;
+                const newPasswordConfirm = document.getElementById('account-new-password-confirm')?.value;
+
+                if (!currentPassword || !newPassword || !newPasswordConfirm) return;
+                if (newPassword !== newPasswordConfirm) {
+                    alert('Passwörter stimmen nicht überein.');
+                    return;
+                }
+
+                try {
+                    await API.account.changePassword(currentPassword, newPassword);
+                    alert('Passwort erfolgreich geändert.');
+                    passwordForm.reset();
+                } catch (err) {
+                    alert('Fehler: ' + err.message);
+                }
+            });
+        }
+    }
+
+    hasActivePass() {
+        const expires = this.currentUser?.passExpiresAt;
+        if (!expires) return false;
+        return new Date(expires).getTime() > Date.now();
+    }
+
+    getPassRemainingMs() {
+        const expires = this.currentUser?.passExpiresAt;
+        if (!expires) return 0;
+        return Math.max(0, new Date(expires).getTime() - Date.now());
+    }
+
+    updateAccountSection() {
+        const coinsEl = document.getElementById('account-coins');
+        const remainingEl = document.getElementById('account-pass-remaining');
+        const untilEl = document.getElementById('account-pass-until');
+        const hintEl = document.getElementById('account-pass-hint');
+
+        if (!coinsEl) return;
+
+        const coins = typeof this.currentUser?.coins === 'number' ? this.currentUser.coins : 0;
+        coinsEl.textContent = coins;
+        coinsEl.classList.toggle('has-coins', coins > 0);
+        coinsEl.classList.toggle('no-coins', coins === 0);
+
+        if (this.hasActivePass()) {
+            const remainingMs = this.getPassRemainingMs();
+            const hours = Math.floor(remainingMs / 3600000);
+            const minutes = Math.floor((remainingMs % 3600000) / 60000);
+            remainingEl.textContent = `${hours}h ${minutes}m`;
+            untilEl.textContent = new Date(this.currentUser.passExpiresAt).toLocaleString();
+            if (hintEl) hintEl.textContent = '';
+        } else {
+            remainingEl.textContent = '—';
+            untilEl.textContent = '—';
+            if (hintEl) hintEl.textContent = '';
+        }
+    }
+
+    showPassOverlay({ title, message, autoHideMs } = {}) {
+        const overlay = document.getElementById('pass-overlay');
+        if (!overlay) return;
+
+        const titleEl = document.getElementById('pass-overlay-title');
+        const messageEl = document.getElementById('pass-overlay-message');
+        const coinsEl = document.getElementById('pass-overlay-coins');
+
+        if (titleEl) titleEl.textContent = title || 'Kein aktiver Pass';
+        if (messageEl) messageEl.textContent = message || 'Du brauchst einen aktiven Pass, um Streams zu starten.';
+
+        const coins = typeof this.currentUser?.coins === 'number' ? this.currentUser.coins : 0;
+        if (coinsEl) coinsEl.textContent = coins;
+
+        overlay.classList.remove('hidden');
+
+        if (this.passTimers.autoHide) {
+            clearTimeout(this.passTimers.autoHide);
+        }
+        if (autoHideMs) {
+            this.passTimers.autoHide = setTimeout(() => this.hidePassOverlay(), autoHideMs);
+        }
+    }
+
+    hidePassOverlay() {
+        const overlay = document.getElementById('pass-overlay');
+        overlay?.classList.add('hidden');
+    }
+
+    async redeemPass(plan) {
+        try {
+            const result = await API.pass.redeem(plan);
+            this.currentUser.coins = typeof result.coins === 'number' ? result.coins : 0;
+            this.currentUser.passExpiresAt = result.passExpiresAt || null;
+
+            this.hidePassOverlay();
+            this.updateAccountSection();
+            this.clearPassTimers();
+            this.removePassBlur();
+            this.onStreamStart();
+
+            if (this.pendingChannelDataset) {
+                const dataset = this.pendingChannelDataset;
+                this.pendingChannelDataset = null;
+                await this.channelList.selectChannel(dataset);
+            }
+
+            if (this.pendingWatchPayload) {
+                const payload = this.pendingWatchPayload;
+                this.pendingWatchPayload = null;
+                await this.pages.watch.play(payload.content, payload.streamUrl);
+            }
+        } catch (err) {
+            alert('Fehler: ' + err.message);
+        }
+    }
+
+    onStreamStart() {
+        this.clearPassTimers();
+
+        if (!this.hasActivePass()) {
+            this.showPassOverlay({
+                title: 'Kein aktiver Pass',
+                message: 'Du brauchst einen aktiven Pass, um Streams zu starten.'
+            });
+            return;
+        }
+
+        const remainingMs = this.getPassRemainingMs();
+        const warningMs = remainingMs - 30 * 60 * 1000;
+
+        if (warningMs > 0) {
+            this.passTimers.warning = setTimeout(() => {
+                this.showPassOverlay({
+                    title: 'Pass läuft bald ab',
+                    message: 'Dein Pass endet in 30 Minuten.',
+                    autoHideMs: 30000
+                });
+            }, warningMs);
+        }
+
+        this.passTimers.expire = setTimeout(() => {
+            this.handlePassExpired();
+        }, remainingMs);
+    }
+
+    onStreamStop() {
+        this.clearPassTimers();
+        this.removePassBlur();
+        this.hidePassOverlay();
+    }
+
+    handlePassExpired() {
+        this.applyPassBlur();
+        this.showPassOverlay({
+            title: 'Pass abgelaufen',
+            message: 'Dein Pass ist abgelaufen. Du kannst jetzt einen neuen Pass einlösen.'
+        });
+
+        this.passTimers.grace = setTimeout(() => {
+            if (!this.hasActivePass()) {
+                this.player?.stop();
+            }
+        }, 2 * 60 * 1000);
+    }
+
+    clearPassTimers() {
+        Object.values(this.passTimers).forEach(timer => timer && clearTimeout(timer));
+        this.passTimers = {};
+    }
+
+    applyPassBlur() {
+        document.querySelectorAll('.video-container, .watch-video-section').forEach(el => {
+            el.classList.add('pass-blur');
+        });
+    }
+
+    removePassBlur() {
+        document.querySelectorAll('.video-container, .watch-video-section').forEach(el => {
+            el.classList.remove('pass-blur');
+        });
     }
 
     addLogoutButton() {
@@ -240,7 +451,30 @@ class App {
         navbar.appendChild(logoutLink);
     }
 
+    applyContentVisibility() {
+        const showMovies = !!this.currentUser?.showMovies;
+        const showSeries = !!this.currentUser?.showSeries;
+
+        const moviesLink = document.querySelector('.nav-link[data-page="movies"]');
+        const seriesLink = document.querySelector('.nav-link[data-page="series"]');
+        const moviesPage = document.getElementById('page-movies');
+        const seriesPage = document.getElementById('page-series');
+
+        if (moviesLink) moviesLink.style.display = showMovies ? '' : 'none';
+        if (seriesLink) seriesLink.style.display = showSeries ? '' : 'none';
+        if (moviesPage) moviesPage.style.display = showMovies ? '' : 'none';
+        if (seriesPage) seriesPage.style.display = showSeries ? '' : 'none';
+    }
+
     navigateTo(pageName, replaceHistory = false) {
+        if (pageName === 'movies' && !this.currentUser?.showMovies) {
+            pageName = 'live';
+        }
+
+        if (pageName === 'series' && !this.currentUser?.showSeries) {
+            pageName = 'live';
+        }
+
         // Don't navigate if already on this page
         if (this.currentPage === pageName && !replaceHistory) {
             return;

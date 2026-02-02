@@ -7,6 +7,7 @@ class SettingsPage {
         this.app = app;
         this.tabs = document.querySelectorAll('.tabs .tab');
         this.tabContents = document.querySelectorAll('.tab-content');
+        this.sortState = { key: null, direction: 'asc' };
 
         this.init();
     }
@@ -333,6 +334,79 @@ class SettingsPage {
                 }
             });
         }
+
+        const userList = document.getElementById('user-list');
+        if (userList) {
+            const headerRow = userList.closest('table')?.querySelector('thead');
+            if (headerRow) {
+                headerRow.addEventListener('click', (e) => {
+                    const th = e.target.closest('th.sortable');
+                    if (!th) return;
+                    const key = th.dataset.sort;
+                    if (!key) return;
+
+                    if (this.sortState.key === key) {
+                        this.sortState.direction = this.sortState.direction === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        this.sortState.key = key;
+                        this.sortState.direction = 'asc';
+                    }
+
+                    this.renderUsers();
+                });
+            }
+
+            userList.addEventListener('click', async (e) => {
+                const btn = e.target.closest('.coin-adjust');
+                if (!btn) return;
+
+                const userId = parseInt(btn.dataset.userId);
+                const delta = parseInt(btn.dataset.delta);
+                if (!userId || !delta) return;
+
+                try {
+                    const result = await API.users.update(userId, { coinsDelta: delta });
+                    const user = this.users?.find(u => u.id === userId);
+                    if (user) {
+                        user.coins = typeof result.coins === 'number' ? result.coins : user.coins;
+                    }
+                    if (this.app?.currentUser?.id === userId) {
+                        this.app.currentUser.coins = typeof result.coins === 'number' ? result.coins : (this.app.currentUser.coins || 0);
+                        this.app.updateAccountSection?.();
+                    }
+                    const coinEl = userList.querySelector(`.coin-count[data-user-id="${userId}"]`);
+                    if (coinEl) {
+                        coinEl.textContent = typeof result.coins === 'number' ? result.coins : (user?.coins || 0);
+                    }
+                } catch (err) {
+                    console.error('Error updating coins:', err);
+                    alert('Error updating coins: ' + err.message);
+                }
+            });
+
+            userList.addEventListener('change', async (e) => {
+                const target = e.target;
+                if (!target.classList.contains('user-visibility-toggle')) return;
+
+                const userId = parseInt(target.dataset.userId);
+                const field = target.dataset.field;
+                const value = target.checked;
+
+                if (!userId || !field) return;
+
+                try {
+                    await API.users.update(userId, { [field]: value });
+                    const user = this.users?.find(u => u.id === userId);
+                    if (user) {
+                        user[field] = value;
+                    }
+                } catch (err) {
+                    console.error('Error updating user visibility:', err);
+                    target.checked = !value;
+                    alert('Error updating user: ' + err.message);
+                }
+            });
+        }
     }
 
     async loadUsers() {
@@ -343,43 +417,128 @@ class SettingsPage {
             const users = await API.users.getAll();
             // Store users in memory for easy access during edit
             this.users = users;
-
-            if (users.length === 0) {
-                userList.innerHTML = '<tr><td colspan="5" class="hint">No users found</td></tr>';
-                return;
-            }
-
-            userList.innerHTML = users.map(user => {
-                const isSSO = !!user.oidcId;
-                const typeBadge = isSSO
-                    ? '<span class="user-badge user-badge-sso">SSO</span>'
-                    : '<span class="user-badge user-badge-local">Local</span>';
-
-                const roleBadge = user.role === 'admin'
-                    ? '<span class="user-badge user-badge-admin">Admin</span>'
-                    : '<span class="user-badge user-badge-viewer">Viewer</span>';
-
-                return `
-                <tr>
-                    <td>
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <strong>${user.username}</strong>
-                            ${typeBadge}
-                        </div>
-                    </td>
-                    <td>${user.email || '<span class="hint">-</span>'}</td>
-                    <td>${roleBadge}</td>
-                    <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</td>
-                    <td>
-                        <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.openEditUserModal(${user.id})">Edit</button>
-                        <button class="btn btn-sm btn-error" onclick="window.app.pages.settings.deleteUser(${user.id}, '${user.username}')">Delete</button>
-                    </td>
-                </tr>
-            `}).join('');
+            this.renderUsers();
         } catch (err) {
             console.error('Error loading users:', err);
-            userList.innerHTML = '<tr><td colspan="5" class="hint">Error loading users</td></tr>';
+            userList.innerHTML = '<tr><td colspan="9" class="hint">Error loading users</td></tr>';
         }
+    }
+
+    renderUsers() {
+        const userList = document.getElementById('user-list');
+        if (!userList) return;
+
+        const users = Array.isArray(this.users) ? [...this.users] : [];
+        if (users.length === 0) {
+            userList.innerHTML = '<tr><td colspan="9" class="hint">No users found</td></tr>';
+            return;
+        }
+
+        const sorted = this.getSortedUsers(users);
+
+        userList.innerHTML = sorted.map(user => {
+            const isSSO = !!user.oidcId;
+            const typeBadge = isSSO
+                ? '<span class="user-badge user-badge-sso">SSO</span>'
+                : '<span class="user-badge user-badge-local">Local</span>';
+
+            const lastOnline = user.lastOnline
+                ? new Date(user.lastOnline).toLocaleString()
+                : '<span class="hint">-</span>';
+
+            const showMovies = !!user.showMovies;
+            const showSeries = !!user.showSeries;
+            const coins = typeof user.coins === 'number' ? user.coins : 0;
+
+            const passExpiryTs = user.passExpiresAt ? new Date(user.passExpiresAt).getTime() : 0;
+            const passRemainingMs = passExpiryTs > Date.now() ? (passExpiryTs - Date.now()) : 0;
+            const passRemainingLabel = passRemainingMs > 0
+                ? (() => {
+                    const days = Math.floor(passRemainingMs / 86400000);
+                    const hours = Math.floor((passRemainingMs % 86400000) / 3600000);
+                    const minutes = Math.floor((passRemainingMs % 3600000) / 60000);
+                    if (days > 0) return `${days}d ${hours}h`;
+                    if (hours > 0) return `${hours}h ${minutes}m`;
+                    return `${minutes}m`;
+                })()
+                : '<span class="hint">-</span>';
+
+            const lastOnlineTs = user.lastOnline ? new Date(user.lastOnline).getTime() : 0;
+            const isOnline = lastOnlineTs && (Date.now() - lastOnlineTs <= 5 * 60 * 1000);
+            const statusClass = isOnline ? 'online' : 'offline';
+            const statusLabel = isOnline ? 'Online' : 'Offline';
+
+            return `
+            <tr>
+                <td><span class="status-dot ${statusClass}" title="${statusLabel}"></span></td>
+                <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <strong>${user.username}</strong>
+                        ${typeBadge}
+                    </div>
+                </td>
+                <td>
+                    <div class="coin-cell">
+                        <span class="coin-count" data-user-id="${user.id}">${coins}</span>
+                        <button class="btn btn-sm btn-ghost coin-adjust" data-user-id="${user.id}" data-delta="-1">-1</button>
+                        <button class="btn btn-sm btn-ghost coin-adjust" data-user-id="${user.id}" data-delta="1">+1</button>
+                    </div>
+                </td>
+                <td>${lastOnline}</td>
+                <td>${passRemainingLabel}</td>
+                <td>
+                    <input type="checkbox" class="user-visibility-toggle" data-user-id="${user.id}" data-field="showMovies" ${showMovies ? 'checked' : ''}>
+                </td>
+                <td>
+                    <input type="checkbox" class="user-visibility-toggle" data-user-id="${user.id}" data-field="showSeries" ${showSeries ? 'checked' : ''}>
+                </td>
+                <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</td>
+                <td>
+                    <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.openEditUserModal(${user.id})">Edit</button>
+                    <button class="btn btn-sm btn-error" onclick="window.app.pages.settings.deleteUser(${user.id}, '${user.username}')">Delete</button>
+                </td>
+            </tr>
+        `;
+        }).join('');
+    }
+
+    getSortedUsers(users) {
+        if (!this.sortState.key) return users;
+
+        const key = this.sortState.key;
+        const dir = this.sortState.direction === 'desc' ? -1 : 1;
+        const now = Date.now();
+
+        const getValue = (user) => {
+            switch (key) {
+                case 'online': {
+                    const lastOnlineTs = user.lastOnline ? new Date(user.lastOnline).getTime() : 0;
+                    const isOnline = lastOnlineTs && (now - lastOnlineTs <= 5 * 60 * 1000);
+                    return isOnline ? 1 : 0;
+                }
+                case 'username':
+                    return (user.username || '').toLowerCase();
+                case 'coins':
+                    return typeof user.coins === 'number' ? user.coins : 0;
+                case 'lastOnline':
+                    return user.lastOnline ? new Date(user.lastOnline).getTime() : 0;
+                case 'passValid':
+                    return user.passExpiresAt ? new Date(user.passExpiresAt).getTime() : 0;
+                default:
+                    return 0;
+            }
+        };
+
+        return users.sort((a, b) => {
+            const av = getValue(a);
+            const bv = getValue(b);
+
+            if (typeof av === 'string' && typeof bv === 'string') {
+                return av.localeCompare(bv) * dir;
+            }
+
+            return (av - bv) * dir;
+        });
     }
 
     openEditUserModal(userId) {

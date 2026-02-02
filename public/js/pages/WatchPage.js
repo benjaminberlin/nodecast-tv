@@ -246,6 +246,15 @@ class WatchPage {
      * @param {string} streamUrl - Stream URL
      */
     async play(content, streamUrl) {
+        if (this.app && !this.app.hasActivePass()) {
+            this.app.pendingWatchPayload = { content, streamUrl };
+            this.app.showPassOverlay({
+                title: 'Kein aktiver Pass',
+                message: 'Du brauchst einen aktiven Pass, um diesen Stream zu starten.'
+            });
+            return;
+        }
+
         this.content = content;
         this.contentType = content.type;
         this.seriesInfo = content.seriesInfo || null;
@@ -274,6 +283,8 @@ class WatchPage {
 
         // Load video
         await this.loadVideo(streamUrl);
+
+        this.app?.onStreamStart?.();
 
         // Show Now Playing indicator in navbar
         this.showNowPlaying(content.title);
@@ -642,6 +653,8 @@ class WatchPage {
         }
 
         this.hideNowPlaying();
+
+        this.app?.onStreamStop?.();
     }
 
     // === Playback Controls ===
