@@ -23,6 +23,7 @@ async function loadDb() {
         favorites: data.favorites || [],
         settings: data.settings || getDefaultSettings(),
         users: data.users || [],
+        invites: data.invites || [],
         nextId: data.nextId || 1
       };
     } catch (error) {
@@ -34,6 +35,7 @@ async function loadDb() {
           favorites: [],
           settings: getDefaultSettings(),
           users: [],
+          invites: [],
           nextId: 1
         };
       }
@@ -48,6 +50,7 @@ async function loadDb() {
       favorites: [],
       settings: getDefaultSettings(),
       users: [],
+      invites: [],
       nextId: 1
     };
   }
@@ -83,7 +86,10 @@ function getDefaultSettings() {
     // Upscaling settings
     upscaleEnabled: false,
     upscaleMethod: 'hardware',    // hardware | software
-    upscaleTarget: '1080p'        // 1080p | 4k | 720p
+    upscaleTarget: '1080p',       // 1080p | 4k | 720p
+    // Contact settings
+    contactPhone: '',
+    contactNote: ''
   };
 }
 
@@ -398,6 +404,10 @@ const users = {
       role: userData.role || 'viewer',
       oidcId: userData.oidcId || null,
       email: userData.email || null,
+      sessionId: userData.sessionId || null,
+      approved: userData.approved !== undefined ? userData.approved : true,
+      invitedByUserId: userData.invitedByUserId || null,
+      inviteId: userData.inviteId || null,
       showMovies: !!userData.showMovies,
       showSeries: !!userData.showSeries,
       coins: typeof userData.coins === 'number' ? userData.coins : 0,
@@ -470,4 +480,51 @@ const users = {
   }
 };
 
-module.exports = { loadDb, saveDb, sources, hiddenItems, favorites, settings, users, getDefaultSettings, getUserAgent, USER_AGENT_PRESETS };
+// Invite operations
+const invites = {
+  async getAll() {
+    const db = await loadDb();
+    return db.invites || [];
+  },
+
+  async getByToken(token) {
+    const db = await loadDb();
+    return db.invites?.find(i => i.token === token);
+  },
+
+  async create(inviteData) {
+    const db = await loadDb();
+    if (!db.invites) db.invites = [];
+
+    const newInvite = {
+      id: db.nextId++,
+      token: inviteData.token,
+      createdByUserId: inviteData.createdByUserId,
+      createdAt: inviteData.createdAt || new Date().toISOString(),
+      expiresAt: inviteData.expiresAt || null,
+      usedByUserId: null,
+      usedAt: null
+    };
+
+    db.invites.push(newInvite);
+    await saveDb(db);
+    return newInvite;
+  },
+
+  async markUsed(token, userId) {
+    const db = await loadDb();
+    const idx = db.invites?.findIndex(i => i.token === token);
+    if (idx === -1 || idx === undefined) {
+      throw new Error('Invite not found');
+    }
+    db.invites[idx] = {
+      ...db.invites[idx],
+      usedByUserId: userId,
+      usedAt: new Date().toISOString()
+    };
+    await saveDb(db);
+    return db.invites[idx];
+  }
+};
+
+module.exports = { loadDb, saveDb, sources, hiddenItems, favorites, settings, users, invites, getDefaultSettings, getUserAgent, USER_AGENT_PRESETS };

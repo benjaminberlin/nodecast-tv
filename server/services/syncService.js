@@ -1,6 +1,8 @@
 const { getDb } = require('../db/sqlite');
 const { sources, settings } = require('../db'); // For source config and settings
 const xtreamApi = require('./xtreamApi');
+const fs = require('fs');
+const path = require('path');
 const m3uParser = require('./m3uParser');
 const epgParser = require('./epgParser');
 
@@ -513,7 +515,15 @@ class SyncService {
         let batchCount = 0;
 
         // Stream and process in batches (default 500 channels per batch)
-        for await (const batch of m3uParser.fetchAndParseStreaming(source.url)) {
+        const localPath = source.localPath || (source.url && source.url.startsWith('local://')
+            ? path.join(__dirname, '..', '..', 'data', 'm3u', source.url.replace('local://', ''))
+            : null);
+
+        const parser = localPath
+            ? m3uParser.parseStreaming(fs.createReadStream(localPath))
+            : m3uParser.fetchAndParseStreaming(source.url);
+
+        for await (const batch of parser) {
             batchCount++;
 
             // Map M3U channel format to our schema

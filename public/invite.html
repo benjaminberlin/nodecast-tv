@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>manyak</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="stylesheet" href="css/main.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: radial-gradient(1200px 600px at 10% -10%, rgba(99, 102, 241, 0.2), transparent 60%),
+                radial-gradient(900px 500px at 110% 10%, rgba(16, 185, 129, 0.16), transparent 55%),
+                #f5f6fb;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: #111827;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(245, 246, 251, 0.92));
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .invite-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .invite-box {
+            position: relative;
+            background: rgba(255, 255, 255, 0.92);
+            padding: var(--space-xl);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+            width: 100%;
+            max-width: 420px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            backdrop-filter: blur(16px);
+            overflow: hidden;
+        }
+
+        .invite-box h1 {
+            margin: 0 0 var(--space-md) 0;
+            font-size: 22px;
+        }
+
+        .invite-box p {
+            margin: 0 0 var(--space-md) 0;
+            color: #475569;
+            font-size: 14px;
+        }
+
+        .invite-form {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-md);
+        }
+
+        .error-message,
+        .success-message {
+            padding: 10px 12px;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+            background: rgba(239, 68, 68, 0.1);
+            color: #b91c1c;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .success-message.show {
+            display: block;
+            background: rgba(16, 185, 129, 0.1);
+            color: #0f766e;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="invite-container">
+        <div class="invite-box">
+            <h1>Einladung</h1>
+            <p>Erstelle deinen Account. Nach der Registrierung wartet dein Zugang auf Freigabe.</p>
+
+            <div class="error-message" id="invite-error"></div>
+            <div class="success-message" id="invite-success"></div>
+
+            <form class="invite-form" id="invite-form">
+                <div class="form-group">
+                    <label for="invite-username">Benutzername</label>
+                    <input type="text" id="invite-username" class="form-input" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="invite-password">Passwort</label>
+                    <input type="password" id="invite-password" class="form-input" required minlength="6" autocomplete="new-password">
+                </div>
+                <button class="btn btn-primary" type="submit" id="invite-submit">Registrieren</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+
+        const errorEl = document.getElementById('invite-error');
+        const successEl = document.getElementById('invite-success');
+        const submitBtn = document.getElementById('invite-submit');
+
+        function showError(message) {
+            errorEl.textContent = message;
+            errorEl.classList.add('show');
+            successEl.classList.remove('show');
+        }
+
+        function showSuccess(message) {
+            successEl.textContent = message;
+            successEl.classList.add('show');
+            errorEl.classList.remove('show');
+        }
+
+        async function validateToken() {
+            if (!token) {
+                showError('Einladungslink ist ungültig.');
+                submitBtn.disabled = true;
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/auth/invites/${token}`);
+                const data = await res.json();
+                if (!res.ok || !data.valid) {
+                    showError(data.error || 'Einladungslink ist ungültig.');
+                    submitBtn.disabled = true;
+                }
+            } catch (err) {
+                showError('Einladungslink ist ungültig.');
+                submitBtn.disabled = true;
+            }
+        }
+
+        document.getElementById('invite-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (!token) {
+                showError('Einladungslink ist ungültig.');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Bitte warten...';
+
+            try {
+                const username = document.getElementById('invite-username').value.trim();
+                const password = document.getElementById('invite-password').value;
+
+                const res = await fetch('/api/auth/register-invite', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token, username, password })
+                });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.error || 'Registrierung fehlgeschlagen');
+                }
+
+                showSuccess('Account erstellt. Bitte warte auf Freigabe durch den Admin.');
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Registriert';
+            } catch (err) {
+                showError(err.message);
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Registrieren';
+            }
+        });
+
+        validateToken();
+    </script>
+</body>
+
+</html>

@@ -1,8 +1,8 @@
 services:
-  nodecast-tv:
-    image: ghcr.io/technomancer702/nodecast-tv:latest
-    build: https://github.com/technomancer702/nodecast-tv.git#main
-    container_name: nodecast-tv
+  manyak:
+    image: manyak
+    build: <repo-url>#main
+    container_name: manyak
     ports:
       - "3000:3000"
     volumes:

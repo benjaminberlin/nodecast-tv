@@ -1,5 +1,5 @@
 /**
- * NodeCast TV Application Entry Point
+ * Application Entry Point
  */
 
 class App {
@@ -33,11 +33,16 @@ class App {
         await this.checkAuth();
 
         this.initPassUi();
+        this.initInviteUi();
+        this.startPassInfoTimer();
 
         // Mobile menu toggle
         const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
         const navbarMenu = document.getElementById('navbar-menu');
 
+        if (this.currentUser?.role === 'admin') {
+            this.pages?.settings?.loadUsers?.();
+        }
         if (mobileMenuToggle && navbarMenu) {
             mobileMenuToggle.addEventListener('click', () => {
                 mobileMenuToggle.classList.toggle('active');
@@ -162,7 +167,7 @@ class App {
         const initialPage = hash && document.getElementById(`page-${hash}`) ? hash : 'live';
         this.navigateTo(initialPage, true); // true = replace history (don't add)
 
-        console.log('NodeCast TV initialized');
+        console.log('App initialized');
     }
 
     async checkAuth() {
@@ -202,6 +207,7 @@ class App {
             this.addLogoutButton();
 
             this.updateAccountSection();
+            await this.loadContactSettings();
 
         } catch (err) {
             console.error('Authentication error:', err);
@@ -254,6 +260,53 @@ class App {
         }
     }
 
+    initInviteUi() {
+        const generateBtn = document.getElementById('invite-generate-btn');
+        const copyBtn = document.getElementById('invite-copy-btn');
+        const linkWrapper = document.getElementById('invite-link');
+        const linkInput = document.getElementById('invite-link-input');
+        const linkMeta = document.getElementById('invite-link-meta');
+
+        if (!generateBtn || !copyBtn || !linkInput || !linkWrapper || !linkMeta) return;
+
+        generateBtn.addEventListener('click', async () => {
+            generateBtn.disabled = true;
+            generateBtn.textContent = 'Bitte warten...';
+
+            try {
+                const result = await API.invites.create();
+                linkInput.value = result.link;
+                linkWrapper.hidden = false;
+                copyBtn.disabled = false;
+                linkMeta.textContent = result.expiresAt
+                    ? `Gültig bis: ${new Date(result.expiresAt).toLocaleString()}`
+                    : '';
+            } catch (err) {
+                alert('Fehler beim Erstellen des Links: ' + err.message);
+            } finally {
+                generateBtn.disabled = false;
+                generateBtn.textContent = 'Einladungslink erzeugen';
+            }
+        });
+
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(linkInput.value);
+                copyBtn.textContent = 'Kopiert';
+                setTimeout(() => {
+                    copyBtn.textContent = 'Link kopieren';
+                }, 1500);
+            } catch (err) {
+                linkInput.select();
+                document.execCommand('copy');
+                copyBtn.textContent = 'Kopiert';
+                setTimeout(() => {
+                    copyBtn.textContent = 'Link kopieren';
+                }, 1500);
+            }
+        });
+    }
+
     hasActivePass() {
         const expires = this.currentUser?.passExpiresAt;
         if (!expires) return false;
@@ -264,6 +317,17 @@ class App {
         const expires = this.currentUser?.passExpiresAt;
         if (!expires) return 0;
         return Math.max(0, new Date(expires).getTime() - Date.now());
+    }
+
+    formatPassRemaining(remainingMs) {
+        const totalMinutes = Math.floor(remainingMs / 60000);
+        const days = Math.floor(totalMinutes / 1440);
+        const hours = Math.floor((totalMinutes % 1440) / 60);
+        const minutes = totalMinutes % 60;
+
+        if (days > 0) return `${days}d ${hours}h`;
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        return `${minutes}m`;
     }
 
     updateAccountSection() {
@@ -281,9 +345,7 @@ class App {
 
         if (this.hasActivePass()) {
             const remainingMs = this.getPassRemainingMs();
-            const hours = Math.floor(remainingMs / 3600000);
-            const minutes = Math.floor((remainingMs % 3600000) / 60000);
-            remainingEl.textContent = `${hours}h ${minutes}m`;
+            remainingEl.textContent = this.formatPassRemaining(remainingMs);
             untilEl.textContent = new Date(this.currentUser.passExpiresAt).toLocaleString();
             if (hintEl) hintEl.textContent = '';
         } else {
@@ -291,6 +353,46 @@ class App {
             untilEl.textContent = '—';
             if (hintEl) hintEl.textContent = '';
         }
+
+        this.updatePlayerPassInfo();
+    }
+
+    async loadContactSettings() {
+        try {
+            const s = await API.settings.get();
+            const noteEl = document.getElementById('account-contact-note');
+
+            if (noteEl) {
+                noteEl.textContent = s.contactNote || '';
+                noteEl.style.display = s.contactNote ? 'block' : 'none';
+            }
+        } catch (err) {
+            console.warn('[App] Failed to load contact settings:', err.message);
+        }
+    }
+
+    updatePlayerPassInfo() {
+        const remainingEl = document.getElementById('player-pass-remaining');
+        const untilEl = document.getElementById('player-pass-until');
+        if (!remainingEl || !untilEl) return;
+
+        if (this.hasActivePass()) {
+            const remainingMs = this.getPassRemainingMs();
+            remainingEl.textContent = this.formatPassRemaining(remainingMs);
+            untilEl.textContent = new Date(this.currentUser.passExpiresAt).toLocaleString();
+        } else {
+            remainingEl.textContent = '—';
+            untilEl.textContent = '—';
+        }
+    }
+
+    startPassInfoTimer() {
+        if (this.passTimers.info) {
+            clearInterval(this.passTimers.info);
+        }
+        this.passTimers.info = setInterval(() => {
+            this.updatePlayerPassInfo();
+        }, 30000);
     }
 
     showPassOverlay({ title, message, autoHideMs } = {}) {
@@ -352,6 +454,8 @@ class App {
 
     onStreamStart() {
         this.clearPassTimers();
+        this.startPassInfoTimer();
+        this.updatePlayerPassInfo();
 
         if (!this.hasActivePass()) {
             this.showPassOverlay({
@@ -386,6 +490,7 @@ class App {
     }
 
     handlePassExpired() {
+        this.updatePlayerPassInfo();
         this.applyPassBlur();
         this.showPassOverlay({
             title: 'Pass abgelaufen',

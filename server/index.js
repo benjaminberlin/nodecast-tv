@@ -100,6 +100,7 @@ app.use('/api/probe', require('./routes/probe'));
 app.use('/api/subtitle', require('./routes/subtitle'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/history', require('./routes/history'));
+app.use('/api/health', require('./routes/health'));
 
 // Version endpoint
 app.get('/api/version', (req, res) => {
@@ -119,7 +120,7 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, async () => {
-    console.log(`NodeCast TV server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://localhost:${PORT}`);
 
     // Trigger background sync with delay to allow server to settle
     setTimeout(async () => {

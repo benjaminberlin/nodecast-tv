@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="public/img/logo-banner.png" alt="nodecast-tv" height="60" />
+  <img src="public/img/logo-banner.png" alt="manyak" height="60" />
 </p>
 
-# What is nodecast-tv?
+# What is manyak?
 
-nodecast-tv is a modern, web-based IPTV player featuring Live TV, EPG, Movies (VOD), and Series support. Built with performance and user experience in mind.
+manyak is a modern, web-based player featuring Live TV, EPG, Movies (VOD), and Series support. Built with performance and user experience in mind.
 
 ## Features
 
@@ -12,7 +12,7 @@ nodecast-tv is a modern, web-based IPTV player featuring Live TV, EPG, Movies (V
 - **📅 TV Guide (EPG)**: Interactive grid guide with 24h timeline, search, and dynamic resizing.
 - **🎬 VOD Support**: Dedicated sections for Movies and TV Series with rich metadata, posters, and seasonal episode lists.
 - **❤️ Favorites System**: Unified favorites for channels, movies, and series with instant synchronization.
-- **🔐 Authentication**: User login system with admin and viewer roles ([details](https://github.com/technomancer702/nodecast-tv/pull/23)).
+- **🔐 Authentication**: User login system with admin and viewer roles.
 - **🆔 OIDC SSO**: Support for Single Sign-On via OIDC providers (Authentik, Keycloak, etc.).
 - **⚡ High Performance**: Optimized for large playlists (7000+ channels) using virtual scrolling and batch rendering.
 - **⚙️ Management**: 
@@ -46,33 +46,22 @@ nodecast-tv is a modern, web-based IPTV player featuring Live TV, EPG, Movies (V
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/yourusername/nodecast-tv.git
-    cd nodecast-tv
+    git clone <repo-url>
+    cd manyak
     ```
-
 2.  Install dependencies:
     ```bash
     npm install
     ```
-
-3.  Start the development server:
-    ```bash
-    npm run dev
-    ```
-
+-- **🔐 Authentication**: User login system with admin and viewer roles.
 4.  Open your browser at `http://localhost:3000`.
 
-### Docker Deployment
-
-You can run nodecast-tv easily using Docker.
-
-1.  Create a `docker-compose.yml` file (or copy the one from this repo):
-
+You can run manyak using Docker.
     ```yaml
     services:
-      nodecast-tv:
-        build: https://github.com/technomancer702/nodecast-tv.git#main
-        container_name: nodecast-tv
+      manyak:
+        build: <repo-url>#main
+        container_name: manyak
         ports:
           - "3000:3000" # Host:Container
         volumes:
@@ -81,30 +70,29 @@ You can run nodecast-tv easily using Docker.
         environment:
           - NODE_ENV=production
           - PORT=3000 # Optional: Internal container port
-    ```
+OIDC_ISSUER_URL=https://your-idp.com/application/o/manyak/
 
 2.  Run the container:
-    ```bash
+manyak is a web-based application. By default, **video decoding is handled by your browser**. However, the built-in **smart transcoding system** automatically converts incompatible media (e.g., HEVC video, Dolby audio) into browser-friendly formats using FFmpeg.
     docker-compose up -d
-    ```
+If you're running manyak behind a reverse proxy (Nginx, Caddy, Traefik) with HTTPS:
 
-The application will be available at `http://localhost:3000`.
+    reverse_proxy manyak:3000 {
 
-
+    proxy_pass http://manyak:3000;
 ### Hardware Acceleration Setup
 
-To enable hardware transcoding (NVENC, QSV, VAAPI), you must expose your host's GPU to the container.
+1.  **Force Backend Proxy:** Enable this in **Settings → Transcoding → Network**. This routes middleware streams through the server, bypassing CORS restrictions.
 
 **1. Intel (QSV) & AMD (VAAPI)**
-Update your `docker-compose.yml` to map the DRI devices and add necessary groups (often required for permission):
-```yaml
-    devices:
+If you're using TVHeadend as your source, you may need to configure a few settings for streams to play correctly in manyak:
+- In manyak, go to **Settings → Transcoding → Network**
+- Add your manyak URL to **"CORS origin"** (e.g., `http://192.168.1.100:3000`)
       - /dev/dri:/dev/dri # Required for VAAPI/QuickSync/AMF (Linux)
     # group_add:       # Optional: Needed mainly if you run as non-root
-    #   - "video"      # Run on host: getent group video
+If you are using `acestream-docker-home` or similar tools, it is **recommended** to use the HLS output format to reduce server load, though manyak can remux raw streams if needed.
     #   - "render"     # Run on host: getent group render
 ```
-
 **2. NVIDIA (NVENC)**
 Ensure you have the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed on your host, then update your `docker-compose.yml`:
 ```yaml
@@ -125,7 +113,7 @@ After restarting the container, go to **Settings -> Transcoding**. The **Hardwar
 Enable Single Sign-On (SSO) with your preferred OIDC provider (Authentik, Keycloak, etc.) by configuring these variables in your `.env` file or Docker environment:
 
 ```env
-OIDC_ISSUER_URL=https://your-idp.com/application/o/nodecast/
+OIDC_ISSUER_URL=https://your-idp.com/application/o/manyak/
 OIDC_CLIENT_ID=your_client_id
 OIDC_CLIENT_SECRET=your_client_secret
 OIDC_CALLBACK_URL=http://localhost:3000/api/auth/oidc/callback # Adjust for your domain
@@ -136,14 +124,14 @@ OIDC_CALLBACK_URL=http://localhost:3000/api/auth/oidc/callback # Adjust for your
 ### Usage
 
 1.  Go to **Settings** -> **Content Sources**.
-2.  Add your IPTV provider details (Xtream Codes or M3U URL).
+2.  Add your provider details (Xtream Codes or M3U URL).
 3.  Click "Refresh Sources".
 4.  Navigate to **Live TV**, **Movies**, or **Series** to browse your content.
 
 
 ## Browser Codec Support & Transcoding
 
-nodecast-tv is a web-based application. By default, **video decoding is handled by your browser**. However, the built-in **smart transcoding system** automatically converts incompatible media (e.g., HEVC video, Dolby audio) into browser-friendly formats using FFmpeg.
+This is a web-based application. By default, **video decoding is handled by your browser**. However, the built-in **smart transcoding system** automatically converts incompatible media (e.g., HEVC video, Dolby audio) into browser-friendly formats using FFmpeg.
 
 **Codec Compatibility Table:**
 
@@ -162,7 +150,7 @@ nodecast-tv is a web-based application. By default, **video decoding is handled 
 
 ## Supported Stream Types
 
-nodecast-tv is optimized for **HLS (HTTP Live Streaming)**.
+Optimized for **HLS (HTTP Live Streaming)**.
 
 -   **✅ HLS (`.m3u8`)**: Fully supported and recommended. Best for adaptive bitrate and network resilience.
 -   **✅ MPEG-TS (`.ts`)**: Supported via Force Remux in settings.
@@ -234,7 +222,7 @@ All transcoding and stream processing settings are found in **Settings → Trans
 
 ### HTTPS / Reverse Proxy Issues
 
-If you're running nodecast-tv behind a reverse proxy (Nginx, Caddy, Traefik) with HTTPS:
+If you're running the app behind a reverse proxy (Nginx, Caddy, Traefik) with HTTPS:
 
 | Symptom | Likely Cause | Solution |
 |---------|--------------|----------|
@@ -244,7 +232,7 @@ If you're running nodecast-tv behind a reverse proxy (Nginx, Caddy, Traefik) wit
 **Caddy example:**
 ```
 tv.domain.com {
-    reverse_proxy nodecast:3000 {
+    reverse_proxy app:3000 {
         flush_interval -1
         header_up X-Forwarded-Proto {scheme}
     }
@@ -254,7 +242,7 @@ tv.domain.com {
 **Nginx example:**
 ```nginx
 location / {
-    proxy_pass http://nodecast:3000;
+    proxy_pass http://app:3000;
     proxy_http_version 1.1;           # Required for chunked transfers and keep-alive
     proxy_buffering off;              # Don't buffer responses (required for streaming)
     proxy_request_buffering off;      # Don't buffer requests
@@ -269,27 +257,27 @@ location / {
 }
 ```
 
-### IPTV Middleware (m3u-editor, dispatcharr, Threadfin, xTeVe)
+### Middleware (m3u-editor, dispatcharr, Threadfin, xTeVe)
 If you manage your streams with middleware tools, you may encounter CORS issues or raw MPEG-TS streams that browsers can't play directly.
 
 **Recommended Setup:**
-1.  **Force Backend Proxy:** Enable this in **Settings → Transcoding → Network**. This routes middleware streams through NodeCast TV, bypassing CORS restrictions.
+1.  **Force Backend Proxy:** Enable this in **Settings → Transcoding → Network**. This routes middleware streams through the server, bypassing CORS restrictions.
 2.  **Auto Transcode:** Keep this enabled (default). It will automatically detect if the middleware stream (e.g., MPEG-TS) needs to be remuxed or transcoded for the browser.
 
 There is rarely a need to configure specific "Force Remux" settings manually anymore; the system detects stream types automatically.
 
 ### TVHeadend
 
-If you're using TVHeadend as your source, you may need to configure a few settings for streams to play correctly in nodecast-tv:
+If you're using TVHeadend as your source, you may need to configure a few settings for streams to play correctly in the app:
 
 **Option 1: Enable Force Backend Proxy (Easiest)**
-- In nodecast-tv, go to **Settings → Transcoding → Network**
+- In the app, go to **Settings → Transcoding → Network**
 - Enable **"Force Backend Proxy"**
 - This routes streams through the server, bypassing browser CORS restrictions
 
 **Option 2: Configure TVHeadend CORS**
 - In TVHeadend, go to **Configuration → General → Base → HTTP Server Settings**
-- Add your nodecast-tv URL to **"CORS origin"** (e.g., `http://192.168.1.100:3000`)
+- Add your app URL to **"CORS origin"** (e.g., `http://192.168.1.100:3000`)
 - **Note:** You must include the protocol (`http://` or `https://`)
 
 **Additional Tips:**
@@ -298,7 +286,7 @@ If you're using TVHeadend as your source, you may need to configure a few settin
 
 ### Acestream / P2P Streaming
 
-If you are using `acestream-docker-home` or similar tools, it is **recommended** to use the HLS output format to reduce server load, though NodeCast TV can remux raw streams if needed.
+If you are using `acestream-docker-home` or similar tools, it is **recommended** to use the HLS output format to reduce server load, though the app can remux raw streams if needed.
 
 -   **Recommended:** `http://proxy:6878/ace/manifest.m3u8?id=...` (HLS Playlist - Direct Play)
 -   **Supported:** `http://proxy:6878/ace/getstream?id=...` (MPEG-TS - Requires Server Remuxing)
@@ -314,7 +302,7 @@ If you are using `acestream-docker-home` or similar tools, it is **recommended**
 ## Project Structure
 
 ```
-nodecast-tv/
+app/
 ├── public/              # Frontend assets
 │   ├── css/             # Stylesheets
 │   ├── js/              # Client-side logic

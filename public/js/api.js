@@ -1,5 +1,5 @@
 /**
- * API Client - Frontend API wrapper for NodeCast TV
+ * API Client - Frontend API wrapper
  */
 
 const API = {
@@ -62,6 +62,9 @@ const API = {
         getStatus: () => API.request('GET', '/sources/status'), // Get all statuses
         estimate: (id) => API.request('GET', `/sources/${id}/estimate`), // Estimate M3U size
         estimateByUrl: (url, type) => API.request('POST', '/sources/estimate', { url, type }), // Estimate by URL (before creation)
+        uploadM3u: (payload) => API.request('POST', '/sources/m3u/upload', payload),
+        getM3uContent: (id) => API.request('GET', `/sources/${id}/m3u`),
+        updateM3uContent: (id, content) => API.request('PUT', `/sources/${id}/m3u`, { content })
     },
 
     // Channels (hidden items)
@@ -165,7 +168,9 @@ const API = {
         getAll: () => API.request('GET', '/auth/users'),
         create: (data) => API.request('POST', '/auth/users', data),
         update: (id, data) => API.request('PUT', `/auth/users/${id}`, data),
-        delete: (id) => API.request('DELETE', `/auth/users/${id}`)
+        delete: (id) => API.request('DELETE', `/auth/users/${id}`),
+        approve: (id) => API.request('POST', `/auth/users/${id}/approve`),
+        reject: (id) => API.request('POST', `/auth/users/${id}/reject`)
     },
 
     // Passes / Account
@@ -175,6 +180,16 @@ const API = {
 
     account: {
         changePassword: (currentPassword, newPassword) => API.request('POST', '/auth/change-password', { currentPassword, newPassword })
+    },
+
+    invites: {
+        create: () => API.request('POST', '/auth/invites'),
+        validate: (token) => API.request('GET', `/auth/invites/${token}`),
+        register: (payload) => API.request('POST', '/auth/register-invite', payload)
+    },
+
+    health: {
+        checkStream: (data) => API.request('POST', '/health/stream', data)
     }
 };
 

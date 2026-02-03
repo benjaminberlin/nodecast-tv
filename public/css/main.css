@@ -1,5 +1,5 @@
 /* =====================================================
-  * NodeCast TV - Dark Theme Design System
+  * Dark Theme Design System
    ===================================================== */
 
 /* CSS Variables */
@@ -169,6 +169,40 @@ h4 {
   backdrop-filter: blur(8px);
 }
 
+.watch-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.pass-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.35);
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+  min-width: 140px;
+}
+
+.pass-status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.pass-label {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.pass-value {
+  font-weight: 600;
+}
+
 .pass-overlay-card {
   background: rgba(255, 255, 255, 0.95);
   border: 1px solid var(--color-border);
@@ -256,6 +290,25 @@ h4 {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--space-sm);
   margin-top: var(--space-sm);
+}
+.invite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+.invite-link {
+  margin-top: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+.invite-link .form-input {
+  font-family: monospace;
+}
+.invite-meta {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
 }
 
 .account-pass-actions .btn span {
@@ -815,6 +868,35 @@ h4 {
   opacity: 0.5;
 }
 
+.channel-item.is-offline {
+  opacity: 0.45;
+  filter: grayscale(0.85);
+}
+
+.channel-item.is-offline .channel-name,
+.channel-item.is-offline .channel-program {
+  color: var(--color-text-muted);
+}
+
+.notification-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f97316;
+  display: inline-block;
+  margin-left: 6px;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.2);
+}
+
+.user-table .pending-user {
+  background: rgba(249, 115, 22, 0.12);
+}
+
+.user-table .pending-user td {
+  border-top: 1px solid rgba(249, 115, 22, 0.25);
+  border-bottom: 1px solid rgba(249, 115, 22, 0.25);
+}
+
 .channel-logo {
   width: 40px;
   height: 40px;
@@ -856,7 +938,7 @@ h4 {
 .video-container {
   flex: 1;
   position: relative;
-  background: #000;
+  background: var(--color-bg-primary);
   overflow: hidden;
   min-height: 0;
   /* Allow flex child to shrink */
@@ -909,7 +991,7 @@ h4 {
   width: 100%;
   height: 100%;
   max-height: 100%;
-  background: #000;
+  background: var(--color-bg-primary);
   object-fit: contain;
   /* Maintain aspect ratio without overflow */
 }
@@ -1744,6 +1826,24 @@ kbd {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
+}
+
+.modal-content.m3u-editor-modal {
+  width: 95vw;
+  max-width: 95vw;
+  height: 90vh;
+}
+
+.modal-content.m3u-editor-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content.m3u-editor-modal #m3u-editor {
+  flex: 1;
+  min-height: 60vh;
+  width: 100%;
+  resize: both;
 }
 
 .modal-header {

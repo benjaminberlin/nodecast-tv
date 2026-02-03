@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const router = express.Router();
 const db = require('../db');
 const auth = require('../auth');
@@ -39,12 +40,18 @@ router.get('/oidc/callback',
     auth.passport.authenticate('openidconnect', { session: false, failureRedirect: '/login.html?error=SSO+Failed' }),
     async (req, res) => {
         // Successful authentication
+        const sessionId = crypto.randomUUID();
+        let updatedUser = req.user;
         try {
-            await db.users.update(req.user.id, { lastOnline: new Date().toISOString() });
+            updatedUser = await db.users.update(req.user.id, {
+                lastOnline: new Date().toISOString(),
+                sessionId
+            });
         } catch (err) {
             console.warn('Failed to update lastOnline for OIDC user:', err.message);
+            return res.redirect('/login.html?error=SSO+Failed');
         }
-        const token = auth.generateToken(req.user);
+        const token = auth.generateToken(updatedUser, sessionId);
 
         // Redirect to hompage with token
         res.redirect(`/?token=${token}`);
@@ -90,15 +97,18 @@ router.post('/setup', async (req, res) => {
 
         // Create admin user
         const passwordHash = await auth.hashPassword(password);
+        const sessionId = crypto.randomUUID();
         const adminUser = await db.users.create({
             username,
             passwordHash,
             role: 'admin',
-            lastOnline: new Date().toISOString()
+            lastOnline: new Date().toISOString(),
+            sessionId,
+            approved: true
         });
 
         // Generate token for immediate login
-        const token = auth.generateToken(adminUser);
+        const token = auth.generateToken(adminUser, sessionId);
 
         res.status(201).json({
             message: 'Admin user created successfully',
@@ -126,21 +136,39 @@ router.post('/login', (req, res, next) => {
             return res.status(401).json({ error: info?.message || 'Invalid credentials' });
         }
 
+        if (user.approved === false) {
+            return res.status(403).json({ error: 'Account wartet auf Freigabe' });
+        }
+
+        const forceLogin = !!req.body.forceLogin;
+        if (user.sessionId && !forceLogin) {
+            return res.status(409).json({
+                error: 'Du hast bereits eine aktive Sitzung auf einem anderen Gerät.',
+                code: 'ACTIVE_SESSION'
+            });
+        }
+
+        const sessionId = crypto.randomUUID();
+        let updatedUser = user;
         try {
-            await db.users.update(user.id, { lastOnline: new Date().toISOString() });
+            updatedUser = await db.users.update(user.id, {
+                lastOnline: new Date().toISOString(),
+                sessionId
+            });
         } catch (updateErr) {
             console.warn('Failed to update lastOnline on login:', updateErr.message);
+            return res.status(500).json({ error: 'Server error' });
         }
 
         // Generate JWT token
-        const token = auth.generateToken(user);
+        const token = auth.generateToken(updatedUser, sessionId);
 
         res.json({
             token,
             user: {
-                id: user.id,
-                username: user.username,
-                role: user.role
+                id: updatedUser.id || user.id,
+                username: updatedUser.username || user.username,
+                role: updatedUser.role || user.role
             }
         });
     })(req, res, next);
@@ -150,9 +178,12 @@ router.post('/login', (req, res, next) => {
  * Logout (client-side handles token removal)
  * POST /api/auth/logout
  */
-router.post('/logout', (req, res) => {
-    // With JWT, logout is handled client-side by removing the token
-    // This endpoint exists for consistency and future server-side token blacklisting
+router.post('/logout', auth.requireAuth, async (req, res) => {
+    try {
+        await db.users.update(req.user.id, { sessionId: null });
+    } catch (err) {
+        console.warn('Failed to clear session on logout:', err.message);
+    }
     res.json({ success: true, message: 'Logged out successfully' });
 });
 
@@ -181,7 +212,10 @@ router.get('/me', auth.requireAuth, async (req, res) => {
             showMovies: !!user.showMovies,
             showSeries: !!user.showSeries,
             coins: typeof user.coins === 'number' ? user.coins : 0,
-            passExpiresAt: user.passExpiresAt || null
+            passExpiresAt: user.passExpiresAt || null,
+            approved: user.approved !== false,
+            invitedByUserId: user.invitedByUserId || null,
+            inviteId: user.inviteId || null
         });
     } catch (err) {
         console.error('Error in /me:', err);
@@ -196,11 +230,17 @@ router.get('/me', auth.requireAuth, async (req, res) => {
 router.get('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
     try {
         const allUsers = await db.users.getAll();
+        const userMap = new Map(allUsers.map(u => [u.id, u]));
 
         // Remove password hashes
         const users = allUsers.map(u => {
             const { passwordHash, ...userWithoutPassword } = u;
-            return userWithoutPassword;
+            const inviter = u.invitedByUserId ? userMap.get(u.invitedByUserId) : null;
+            return {
+                ...userWithoutPassword,
+                invitedByUsername: inviter ? inviter.username : null,
+                approved: u.approved !== false
+            };
         });
 
         res.json(users);
@@ -234,12 +274,157 @@ router.post('/users', auth.requireAuth, auth.requireAdmin, async (req, res) => {
         const newUser = await db.users.create({
             username,
             passwordHash,
-            role
+            role,
+            approved: true
         });
 
         res.status(201).json(newUser);
     } catch (err) {
         console.error('Error creating user:', err);
+        res.status(500).json({ error: err.message || 'Server error' });
+    }
+});
+
+/**
+ * Approve user (admin only)
+ * POST /api/auth/users/:id/approve
+ */
+router.post('/users/:id/approve', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updated = await db.users.update(id, { approved: true });
+        res.json(updated);
+    } catch (err) {
+        console.error('Error approving user:', err);
+        res.status(500).json({ error: err.message || 'Server error' });
+    }
+});
+
+/**
+ * Reject user (admin only)
+ * POST /api/auth/users/:id/reject
+ */
+router.post('/users/:id/reject', auth.requireAuth, auth.requireAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        await db.users.delete(id);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Error rejecting user:', err);
+        res.status(500).json({ error: err.message || 'Server error' });
+    }
+});
+
+/**
+ * Create invite (authenticated)
+ * POST /api/auth/invites
+ */
+router.post('/invites', auth.requireAuth, async (req, res) => {
+    try {
+        const token = crypto.randomBytes(24).toString('base64url');
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+        const invite = await db.invites.create({
+            token,
+            createdByUserId: req.user.id,
+            createdAt: new Date().toISOString(),
+            expiresAt
+        });
+
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+        const host = req.get('host');
+        const link = `${protocol}://${host}/invite.html?token=${token}`;
+
+        res.json({
+            token,
+            link,
+            expiresAt: invite.expiresAt
+        });
+    } catch (err) {
+        console.error('Error creating invite:', err);
+        res.status(500).json({ error: err.message || 'Server error' });
+    }
+});
+
+/**
+ * Validate invite token
+ * GET /api/auth/invites/:token
+ */
+router.get('/invites/:token', async (req, res) => {
+    try {
+        const { token } = req.params;
+        const invite = await db.invites.getByToken(token);
+        if (!invite) {
+            return res.status(404).json({ valid: false, error: 'Invite not found' });
+        }
+
+        if (invite.usedAt || invite.usedByUserId) {
+            return res.status(400).json({ valid: false, error: 'Invite already used' });
+        }
+
+        if (invite.expiresAt && new Date(invite.expiresAt).getTime() < Date.now()) {
+            return res.status(400).json({ valid: false, error: 'Invite expired' });
+        }
+
+        res.json({ valid: true, expiresAt: invite.expiresAt });
+    } catch (err) {
+        console.error('Error validating invite:', err);
+        res.status(500).json({ valid: false, error: 'Server error' });
+    }
+});
+
+/**
+ * Register with invite token
+ * POST /api/auth/register-invite
+ */
+router.post('/register-invite', async (req, res) => {
+    try {
+        const { token, username, password } = req.body;
+
+        if (!token || !username || !password) {
+            return res.status(400).json({ error: 'Token, username, and password are required' });
+        }
+
+        if (password.length < 6) {
+            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+        }
+
+        const invite = await db.invites.getByToken(token);
+        if (!invite) {
+            return res.status(404).json({ error: 'Invite not found' });
+        }
+
+        if (invite.usedAt || invite.usedByUserId) {
+            return res.status(400).json({ error: 'Invite already used' });
+        }
+
+        if (invite.expiresAt && new Date(invite.expiresAt).getTime() < Date.now()) {
+            return res.status(400).json({ error: 'Invite expired' });
+        }
+
+        const existing = await db.users.getByUsername(username);
+        if (existing) {
+            return res.status(400).json({ error: 'Username already exists' });
+        }
+
+        const passwordHash = await auth.hashPassword(password);
+        const newUser = await db.users.create({
+            username,
+            passwordHash,
+            role: 'viewer',
+            approved: false,
+            invitedByUserId: invite.createdByUserId,
+            inviteId: invite.id
+        });
+
+        await db.invites.markUsed(token, newUser.id);
+
+        res.status(201).json({
+            success: true,
+            message: 'Account created. Waiting for approval.'
+        });
+    } catch (err) {
+        console.error('Error registering invite:', err);
         res.status(500).json({ error: err.message || 'Server error' });
     }
 });

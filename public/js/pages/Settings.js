@@ -26,6 +26,28 @@ class SettingsPage {
 
         // User management (admin only)
         this.initUserManagement();
+
+        // Contact settings (admin only)
+        this.initContactSettings();
+    }
+
+    initContactSettings() {
+        const noteInput = document.getElementById('contact-note');
+        const saveBtn = document.getElementById('contact-save');
+
+        if (!noteInput || !saveBtn) return;
+
+        saveBtn.addEventListener('click', async () => {
+            try {
+                const updates = {
+                    contactNote: noteInput.value.trim()
+                };
+                await API.settings.update(updates);
+                await this.app.loadContactSettings();
+            } catch (err) {
+                alert('Error saving contact settings: ' + err.message);
+            }
+        });
     }
 
     initPlayerSettings() {
@@ -418,9 +440,11 @@ class SettingsPage {
             // Store users in memory for easy access during edit
             this.users = users;
             this.renderUsers();
+            this.updatePendingIndicators();
         } catch (err) {
             console.error('Error loading users:', err);
             userList.innerHTML = '<tr><td colspan="9" class="hint">Error loading users</td></tr>';
+            this.updatePendingIndicators();
         }
     }
 
@@ -449,6 +473,8 @@ class SettingsPage {
             const showMovies = !!user.showMovies;
             const showSeries = !!user.showSeries;
             const coins = typeof user.coins === 'number' ? user.coins : 0;
+            const approved = user.approved !== false;
+            const inviterLabel = user.invitedByUsername || '-';
 
             const passExpiryTs = user.passExpiresAt ? new Date(user.passExpiresAt).getTime() : 0;
             const passRemainingMs = passExpiryTs > Date.now() ? (passExpiryTs - Date.now()) : 0;
@@ -469,7 +495,7 @@ class SettingsPage {
             const statusLabel = isOnline ? 'Online' : 'Offline';
 
             return `
-            <tr>
+            <tr class="${approved ? '' : 'pending-user'}">
                 <td><span class="status-dot ${statusClass}" title="${statusLabel}"></span></td>
                 <td>
                     <div style="display:flex;align-items:center;gap:8px;">
@@ -494,12 +520,24 @@ class SettingsPage {
                 </td>
                 <td>${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</td>
                 <td>
+                    ${approved ? '' : `<button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.approvalAction(${user.id}, '${inviterLabel}')">Freigabe</button>`}
                     <button class="btn btn-sm btn-secondary" onclick="window.app.pages.settings.openEditUserModal(${user.id})">Edit</button>
                     <button class="btn btn-sm btn-error" onclick="window.app.pages.settings.deleteUser(${user.id}, '${user.username}')">Delete</button>
                 </td>
             </tr>
         `;
         }).join('');
+    }
+
+    updatePendingIndicators() {
+        const settingsDot = document.getElementById('settings-notification-dot');
+        const usersTabDot = document.getElementById('users-tab-dot');
+
+        const pendingCount = (Array.isArray(this.users) ? this.users : []).filter(u => u.approved === false).length;
+        const show = pendingCount > 0;
+
+        if (settingsDot) settingsDot.classList.toggle('hidden', !show);
+        if (usersTabDot) usersTabDot.classList.toggle('hidden', !show);
     }
 
     getSortedUsers(users) {
@@ -568,15 +606,15 @@ class SettingsPage {
         try {
             const editId = document.getElementById('edit-user-id');
             const editUsername = document.getElementById('edit-username');
-            const editEmail = document.getElementById('edit-email');
+            const editInvitedBy = document.getElementById('edit-invited-by');
             const editRole = document.getElementById('edit-role');
             const editPassword = document.getElementById('edit-password');
 
-            console.log('Form elements found:', { editId, editUsername, editEmail, editRole, editPassword });
+            console.log('Form elements found:', { editId, editUsername, editInvitedBy, editRole, editPassword });
 
             if (editId) editId.value = user.id;
             if (editUsername) editUsername.value = user.username;
-            if (editEmail) editEmail.value = user.email || '';
+            if (editInvitedBy) editInvitedBy.value = user.invitedByUsername || '-';
             if (editRole) editRole.value = user.role;
             if (editPassword) editPassword.value = '';
 
@@ -673,6 +711,30 @@ class SettingsPage {
         }
     }
 
+    async approvalAction(userId, inviterLabel) {
+        const info = inviterLabel && inviterLabel !== '-' ? `Eingeladen von: ${inviterLabel}.` : 'Eingeladen von: -.';
+        const approve = confirm(`${info}\n\nFreigeben?`);
+        if (approve) {
+            try {
+                await API.users.approve(userId);
+                this.loadUsers();
+            } catch (err) {
+                alert('Error approving user: ' + err.message);
+            }
+            return;
+        }
+
+        const reject = confirm(`${info}\n\nAblehnen? (User wird gelöscht)`);
+        if (!reject) return;
+
+        try {
+            await API.users.reject(userId);
+            this.loadUsers();
+        } catch (err) {
+            alert('Error rejecting user: ' + err.message);
+        }
+    }
+
     switchTab(tabName) {
         this.tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
         this.tabContents.forEach(c => c.classList.toggle('active', c.id === `tab-${tabName}`));
@@ -699,6 +761,10 @@ class SettingsPage {
             const usersTab = document.getElementById('users-tab');
             if (usersTab) {
                 usersTab.style.display = 'block';
+            }
+            const contactTab = document.getElementById('contact-tab');
+            if (contactTab) {
+                contactTab.style.display = 'block';
             }
         }
 
@@ -747,6 +813,15 @@ class SettingsPage {
                 }
             }
             if (userAgentCustomInput) userAgentCustomInput.value = s.userAgentCustom || '';
+        }
+
+        // Load contact settings
+        try {
+            const s = await API.settings.get();
+            const noteInput = document.getElementById('contact-note');
+            if (noteInput) noteInput.value = s.contactNote || '';
+        } catch (err) {
+            console.warn('[Settings] Failed to load contact settings:', err.message);
         }
 
         // Update EPG last refreshed display

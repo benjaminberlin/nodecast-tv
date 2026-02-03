@@ -1,10 +1,35 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs/promises');
+const { existsSync, mkdirSync } = require('fs');
 const router = express.Router();
 const { sources } = require('../db');
 const { getDb } = require('../db/sqlite');
 const xtreamApi = require('../services/xtreamApi');
 const syncService = require('../services/syncService');
 const m3uParser = require('../services/m3uParser');
+
+const m3uDir = path.join(__dirname, '..', '..', 'data', 'm3u');
+if (!existsSync(m3uDir)) {
+    mkdirSync(m3uDir, { recursive: true });
+}
+
+function getLocalM3uPath(source) {
+    if (!source) return null;
+    if (source.localPath) return source.localPath;
+    if (source.url && source.url.startsWith('local://')) {
+        const filename = source.url.replace('local://', '');
+        return path.join(m3uDir, filename);
+    }
+    return null;
+}
+
+function sanitizeFilename(name = 'playlist.m3u') {
+    const base = path.basename(name).replace(/[^a-zA-Z0-9._-]/g, '_');
+    return base.toLowerCase().endsWith('.m3u') || base.toLowerCase().endsWith('.m3u8')
+        ? base
+        : `${base}.m3u`;
+}
 
 // Get all sources
 router.get('/', async (req, res) => {
@@ -80,6 +105,98 @@ router.post('/', async (req, res) => {
     } catch (err) {
         console.error('Error creating source:', err);
         res.status(500).json({ error: 'Failed to create source' });
+    }
+});
+
+// Upload M3U (content)
+router.post('/m3u/upload', async (req, res) => {
+    try {
+        const { name, content, filename } = req.body || {};
+
+        if (!name || !content) {
+            return res.status(400).json({ error: 'Name and content are required' });
+        }
+
+        if (!content.includes('#EXTM3U')) {
+            return res.status(400).json({ error: 'Invalid M3U format' });
+        }
+
+        const safeName = sanitizeFilename(filename || name);
+        const uniqueName = `${Date.now()}_${safeName}`;
+        const filePath = path.join(m3uDir, uniqueName);
+
+        await fs.writeFile(filePath, content, 'utf8');
+
+        const source = await sources.create({
+            type: 'm3u',
+            name,
+            url: `local://${uniqueName}`,
+            localPath: filePath
+        });
+
+        syncService.syncSource(source.id).catch(console.error);
+
+        res.status(201).json(source);
+    } catch (err) {
+        console.error('Error uploading M3U:', err);
+        res.status(500).json({ error: 'Failed to upload M3U' });
+    }
+});
+
+// Get M3U content for editor
+router.get('/:id/m3u', async (req, res) => {
+    try {
+        const source = await sources.getById(req.params.id);
+        if (!source) {
+            return res.status(404).json({ error: 'Source not found' });
+        }
+
+        if (source.type !== 'm3u') {
+            return res.status(400).json({ error: 'Not an M3U source' });
+        }
+
+        const localPath = getLocalM3uPath(source);
+        if (!localPath) {
+            return res.status(400).json({ error: 'M3U content not available for URL sources' });
+        }
+
+        const content = await fs.readFile(localPath, 'utf8');
+        res.json({ content });
+    } catch (err) {
+        console.error('Error reading M3U:', err);
+        res.status(500).json({ error: 'Failed to read M3U' });
+    }
+});
+
+// Update M3U content from editor
+router.put('/:id/m3u', async (req, res) => {
+    try {
+        const source = await sources.getById(req.params.id);
+        if (!source) {
+            return res.status(404).json({ error: 'Source not found' });
+        }
+
+        if (source.type !== 'm3u') {
+            return res.status(400).json({ error: 'Not an M3U source' });
+        }
+
+        const { content } = req.body || {};
+        if (!content || !content.includes('#EXTM3U')) {
+            return res.status(400).json({ error: 'Invalid M3U format' });
+        }
+
+        const localPath = getLocalM3uPath(source);
+        if (!localPath) {
+            return res.status(400).json({ error: 'M3U content not available for URL sources' });
+        }
+
+        await fs.writeFile(localPath, content, 'utf8');
+        syncService.syncSource(parseInt(source.id)).catch(console.error);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Error saving M3U:', err);
+        res.status(500).json({ error: 'Failed to save M3U' });
     }
 });
 
@@ -189,8 +306,14 @@ router.post('/:id/test', async (req, res) => {
             const result = await xtreamApi.authenticate(source.url, source.username, source.password);
             res.json({ success: true, data: result });
         } else if (source.type === 'm3u') {
-            const response = await fetch(source.url);
-            const text = await response.text();
+            const localPath = getLocalM3uPath(source);
+            let text;
+            if (localPath) {
+                text = await fs.readFile(localPath, 'utf8');
+            } else {
+                const response = await fetch(source.url);
+                text = await response.text();
+            }
             const isValid = text.includes('#EXTM3U');
             res.json({ success: isValid, message: isValid ? 'Valid M3U playlist' : 'Invalid M3U format' });
         } else if (source.type === 'epg') {

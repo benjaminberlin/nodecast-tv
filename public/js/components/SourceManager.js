@@ -24,6 +24,7 @@ class SourceManager {
         // Add source buttons
         document.getElementById('add-xtream').addEventListener('click', () => this.showAddModal('xtream'));
         document.getElementById('add-m3u').addEventListener('click', () => this.showAddModal('m3u'));
+        document.getElementById('add-m3u-upload').addEventListener('click', () => this.showM3uUploadModal());
         document.getElementById('add-epg').addEventListener('click', () => this.showAddModal('epg'));
 
         // Initialize content browser
@@ -131,7 +132,7 @@ class SourceManager {
 
         const icons = { xtream: Icons.live, m3u: Icons.guide, epg: Icons.series };
 
-        container.innerHTML = sources.map(source => `
+                container.innerHTML = sources.map(source => `
       <div class="source-item ${source.enabled ? '' : 'disabled'}" data-id="${source.id}">
         <span class="source-icon">${icons[type]}</span>
         <div class="source-info">
@@ -144,6 +145,7 @@ class SourceManager {
           <button class="btn btn-sm btn-secondary" data-action="toggle" title="${source.enabled ? 'Disable' : 'Enable'}">
             ${source.enabled ? Icons.check : Icons.circle}
           </button>
+                    ${type === 'm3u' ? `<button class="btn btn-sm btn-secondary" data-action="edit-m3u" title="Edit M3U">${Icons.save}</button>` : ''}
           <button class="btn btn-sm btn-secondary" data-action="edit" title="Edit">${Icons.settings}</button>
           <button class="btn btn-sm btn-danger" data-action="delete" title="Delete">${Icons.close}</button>
         </div>
@@ -158,6 +160,10 @@ class SourceManager {
             item.querySelector('[data-action="test"]').addEventListener('click', () => this.testSource(id));
             item.querySelector('[data-action="toggle"]').addEventListener('click', () => this.toggleSource(id));
             item.querySelector('[data-action="edit"]').addEventListener('click', () => this.showEditModal(id, type));
+            const editM3uBtn = item.querySelector('[data-action="edit-m3u"]');
+            if (editM3uBtn) {
+                editM3uBtn.addEventListener('click', () => this.showM3uEditor(id));
+            }
             item.querySelector('[data-action="delete"]').addEventListener('click', () => this.deleteSource(id));
         });
     }
@@ -170,6 +176,9 @@ class SourceManager {
         const title = document.getElementById('modal-title');
         const body = document.getElementById('modal-body');
         const footer = document.getElementById('modal-footer');
+        const modalContent = modal.querySelector('.modal-content');
+
+        modalContent?.classList.remove('m3u-editor-modal');
 
         const titles = { xtream: 'Add Xtream Connection', m3u: 'Add M3U Playlist', epg: 'Add EPG Source' };
         title.textContent = titles[type];
@@ -184,9 +193,166 @@ class SourceManager {
         modal.classList.add('active');
 
         // Event listeners
-        modal.querySelector('.modal-close').onclick = () => modal.classList.remove('active');
-        document.getElementById('modal-cancel').onclick = () => modal.classList.remove('active');
+        modal.querySelector('.modal-close').onclick = () => {
+            modal.classList.remove('active');
+            modalContent?.classList.remove('m3u-editor-modal');
+        };
+        document.getElementById('modal-cancel').onclick = () => {
+            modal.classList.remove('active');
+            modalContent?.classList.remove('m3u-editor-modal');
+        };
         document.getElementById('modal-save').onclick = () => this.saveNewSource(type);
+    }
+
+    /**
+     * Show upload M3U modal
+     */
+    showM3uUploadModal() {
+        const modal = document.getElementById('modal');
+        const title = document.getElementById('modal-title');
+        const body = document.getElementById('modal-body');
+        const footer = document.getElementById('modal-footer');
+        const modalContent = modal.querySelector('.modal-content');
+
+        modalContent?.classList.remove('m3u-editor-modal');
+
+        title.textContent = 'Upload M3U';
+
+        body.innerHTML = `
+      <div class="form-group">
+        <label for="m3u-name">Name</label>
+        <input type="text" id="m3u-name" class="form-input" placeholder="My Playlist">
+      </div>
+      <div class="form-group">
+        <label for="m3u-file">M3U File</label>
+        <input type="file" id="m3u-file" class="form-input" accept=".m3u,.m3u8,text/plain">
+      </div>
+    `;
+
+        footer.innerHTML = `
+      <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+      <button class="btn btn-primary" id="modal-save">Upload</button>
+    `;
+
+        modal.classList.add('active');
+        modal.querySelector('.modal-close').onclick = () => {
+            modal.classList.remove('active');
+            modalContent?.classList.remove('m3u-editor-modal');
+        };
+        document.getElementById('modal-cancel').onclick = () => {
+            modal.classList.remove('active');
+            modalContent?.classList.remove('m3u-editor-modal');
+        };
+        document.getElementById('modal-save').onclick = () => this.saveM3uUpload();
+    }
+
+    /**
+     * Save uploaded M3U
+     */
+    async saveM3uUpload() {
+        const name = document.getElementById('m3u-name').value.trim();
+        const fileInput = document.getElementById('m3u-file');
+        const file = fileInput?.files?.[0];
+
+        if (!name) {
+            alert('Name is required');
+            return;
+        }
+
+        if (!file) {
+            alert('Please select a file');
+            return;
+        }
+
+        try {
+            const content = await file.text();
+            if (!content.includes('#EXTM3U')) {
+                alert('Invalid M3U format');
+                return;
+            }
+
+            await API.sources.uploadM3u({ name, content, filename: file.name });
+            document.getElementById('modal').classList.remove('active');
+            await this.loadSources();
+
+            if (window.app?.channelList) {
+                await window.app.channelList.loadSources();
+                await window.app.channelList.loadChannels();
+            }
+        } catch (err) {
+            alert('Error uploading M3U: ' + err.message);
+        }
+    }
+
+    /**
+     * Show M3U editor modal
+     */
+    async showM3uEditor(id) {
+        try {
+            const modal = document.getElementById('modal');
+            const title = document.getElementById('modal-title');
+            const body = document.getElementById('modal-body');
+            const footer = document.getElementById('modal-footer');
+            const modalContent = modal.querySelector('.modal-content');
+
+            title.textContent = 'Edit M3U';
+
+            modalContent?.classList.add('m3u-editor-modal');
+
+                        const result = await API.sources.getM3uContent(id);
+                        body.innerHTML = `
+                <div class="form-group">
+                    <label for="m3u-editor">Playlist</label>
+                    <textarea id="m3u-editor" class="form-input" style="height: 320px; font-family: monospace;"></textarea>
+                </div>
+            `;
+
+                        const editor = document.getElementById('m3u-editor');
+                        if (editor) {
+                                editor.value = result.content || '';
+                        }
+
+            footer.innerHTML = `
+        <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="modal-save">Save</button>
+      `;
+
+            modal.classList.add('active');
+            modal.querySelector('.modal-close').onclick = () => {
+                modal.classList.remove('active');
+                modalContent?.classList.remove('m3u-editor-modal');
+            };
+            document.getElementById('modal-cancel').onclick = () => {
+                modal.classList.remove('active');
+                modalContent?.classList.remove('m3u-editor-modal');
+            };
+            document.getElementById('modal-save').onclick = () => this.saveM3uEditor(id);
+        } catch (err) {
+            alert('Error loading M3U: ' + err.message);
+        }
+    }
+
+    /**
+     * Save M3U editor changes
+     */
+    async saveM3uEditor(id) {
+        const content = document.getElementById('m3u-editor')?.value || '';
+        if (!content.includes('#EXTM3U')) {
+            alert('Invalid M3U format');
+            return;
+        }
+
+        try {
+            await API.sources.updateM3uContent(id, content);
+            document.getElementById('modal').classList.remove('active');
+            await this.loadSources();
+            if (window.app?.channelList) {
+                await window.app.channelList.loadSources();
+                await window.app.channelList.loadChannels();
+            }
+        } catch (err) {
+            alert('Error saving M3U: ' + err.message);
+        }
     }
 
     /**
@@ -200,6 +366,9 @@ class SourceManager {
             const title = document.getElementById('modal-title');
             const body = document.getElementById('modal-body');
             const footer = document.getElementById('modal-footer');
+            const modalContent = modal.querySelector('.modal-content');
+
+            modalContent?.classList.remove('m3u-editor-modal');
 
             title.textContent = `Edit ${type.toUpperCase()} Source`;
             body.innerHTML = this.getSourceForm(type, source);
@@ -211,8 +380,14 @@ class SourceManager {
 
             modal.classList.add('active');
 
-            modal.querySelector('.modal-close').onclick = () => modal.classList.remove('active');
-            document.getElementById('modal-cancel').onclick = () => modal.classList.remove('active');
+            modal.querySelector('.modal-close').onclick = () => {
+                modal.classList.remove('active');
+                modalContent?.classList.remove('m3u-editor-modal');
+            };
+            document.getElementById('modal-cancel').onclick = () => {
+                modal.classList.remove('active');
+                modalContent?.classList.remove('m3u-editor-modal');
+            };
             document.getElementById('modal-save').onclick = () => this.updateSource(id, type);
         } catch (err) {
             console.error('Error loading source:', err);

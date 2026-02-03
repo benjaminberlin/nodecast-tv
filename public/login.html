@@ -170,6 +170,16 @@
             transform: none;
         }
 
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #1f2937;
+        }
+
+        .btn-secondary:hover {
+            background: #cbd5f5;
+            color: #0f172a;
+        }
+
         .error-message {
             background: rgba(239, 68, 68, 0.1);
             color: #b91c1c;
@@ -198,6 +208,57 @@
 
         .setup-message.show {
             display: block;
+        }
+
+        .modal {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(6px);
+        }
+
+        .modal-card {
+            position: relative;
+            background: #ffffff;
+            border-radius: var(--radius-lg);
+            padding: var(--space-lg);
+            width: min(420px, 92vw);
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            z-index: 1;
+        }
+
+        .modal-card h3 {
+            margin: 0 0 var(--space-sm) 0;
+            font-size: 18px;
+            color: #0f172a;
+        }
+
+        .modal-card p {
+            margin: 0 0 var(--space-lg) 0;
+            color: #475569;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: var(--space-sm);
+            justify-content: flex-end;
+            flex-wrap: wrap;
         }
 
         .sso-divider {
@@ -285,6 +346,18 @@
         </div>
     </div>
 
+    <div class="modal" id="active-session-modal" aria-hidden="true">
+        <div class="modal-backdrop"></div>
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="active-session-title">
+            <h3 id="active-session-title">Aktive Sitzung erkannt</h3>
+            <p>Du bist bereits auf einem anderen Gerät eingeloggt. Möchtest du die bestehende Sitzung beenden und dich trotzdem einloggen?</p>
+            <div class="modal-actions">
+                <button type="button" class="btn-login btn-secondary" id="active-session-cancel">Abbrechen</button>
+                <button type="button" class="btn-login" id="active-session-force">Trotzdem einloggen</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Check for URL Error params
         const urlParams = new URLSearchParams(window.location.search);
@@ -320,36 +393,61 @@
             }
         }
 
-        // Handle form submission
-        document.getElementById('login-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
+        const activeSessionModal = document.getElementById('active-session-modal');
+        const activeSessionCancel = document.getElementById('active-session-cancel');
+        const activeSessionForce = document.getElementById('active-session-force');
+        const submitBtn = document.getElementById('submit-btn');
+        const errorMessage = document.getElementById('error-message');
 
+        function showActiveSessionModal() {
+            activeSessionModal.classList.add('show');
+            activeSessionModal.setAttribute('aria-hidden', 'false');
+        }
+
+        function hideActiveSessionModal() {
+            activeSessionModal.classList.remove('show');
+            activeSessionModal.setAttribute('aria-hidden', 'true');
+        }
+
+        function resetSubmitButton() {
+            submitBtn.disabled = false;
+            submitBtn.textContent = isSetupMode ? 'Create Account' : 'Sign In';
+        }
+
+        async function attemptLogin(forceLogin = false) {
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
-            const submitBtn = document.getElementById('submit-btn');
-            const errorMessage = document.getElementById('error-message');
 
             // Clear previous errors
             errorMessage.classList.remove('show');
             errorMessage.textContent = '';
 
-            // Disable button
             submitBtn.disabled = true;
             submitBtn.textContent = 'Please wait...';
 
             try {
                 const endpoint = isSetupMode ? '/api/auth/setup' : '/api/auth/login';
+                const payload = { username, password };
+                if (!isSetupMode && forceLogin) {
+                    payload.forceLogin = true;
+                }
+
                 const response = await fetch(endpoint, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify(payload)
                 });
 
                 const data = await response.json();
 
                 if (!response.ok) {
+                    if (!isSetupMode && response.status === 409 && data.code === 'ACTIVE_SESSION') {
+                        showActiveSessionModal();
+                        resetSubmitButton();
+                        return;
+                    }
                     throw new Error(data.error || 'Authentication failed');
                 }
 
@@ -358,13 +456,26 @@
 
                 // Redirect to main app (replace history to prevent back button issues)
                 window.location.replace('/');
-
             } catch (err) {
                 errorMessage.textContent = err.message;
                 errorMessage.classList.add('show');
-                submitBtn.disabled = false;
-                submitBtn.textContent = isSetupMode ? 'Create Account' : 'Sign In';
+                resetSubmitButton();
             }
+        }
+
+        // Handle form submission
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await attemptLogin(false);
+        });
+
+        activeSessionCancel.addEventListener('click', () => {
+            hideActiveSessionModal();
+        });
+
+        activeSessionForce.addEventListener('click', async () => {
+            hideActiveSessionModal();
+            await attemptLogin(true);
         });
 
         // Check setup status on load

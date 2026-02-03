@@ -23,6 +23,13 @@ class ChannelList {
         this.sources = [];
         this.isLoading = false;
         this.renderedChannels = [];
+        this.healthStatus = new Map(); // key -> { ok, checkedAt }
+        this.healthCheckQueue = [];
+        this.healthCheckInFlight = new Set();
+        this.healthCheckDrainScheduled = false;
+        this.healthCacheTtlMs = 5000;
+        this.healthCheckIntervalMs = 5000;
+        this.maxConcurrentHealthChecks = 6;
 
         this.loadCollapsedState();
         this.init();
@@ -46,7 +53,7 @@ class ChannelList {
      */
     loadCollapsedState() {
         try {
-            const saved = localStorage.getItem('nodecast_tv_collapsed_groups');
+            const saved = localStorage.getItem('manyak_collapsed_groups');
             if (saved) {
                 this.collapsedGroups = new Set(JSON.parse(saved));
                 this._hasCollapsedState = true;
@@ -64,7 +71,7 @@ class ChannelList {
      */
     saveCollapsedState() {
         try {
-            localStorage.setItem('nodecast_tv_collapsed_groups', JSON.stringify([...this.collapsedGroups]));
+            localStorage.setItem('manyak_collapsed_groups', JSON.stringify([...this.collapsedGroups]));
         } catch (err) {
             console.error('Error saving collapsed state:', err);
         }
@@ -185,6 +192,20 @@ class ChannelList {
 
         // Start EPG refresh timer (updates visible program info every 60 seconds)
         this.startEpgRefreshTimer();
+        this.startHealthCheckTimer();
+    }
+
+    /**
+     * Start timer to refresh stream health for visible channels
+     */
+    startHealthCheckTimer() {
+        if (this._healthCheckTimer) {
+            clearInterval(this._healthCheckTimer);
+        }
+
+        this._healthCheckTimer = setInterval(() => {
+            this.checkHealthForRenderedChannels();
+        }, this.healthCheckIntervalMs);
     }
 
     /**
@@ -277,6 +298,124 @@ class ChannelList {
         if (this._programInfoCache) {
             this._programInfoCache.clear();
         }
+    }
+
+    getHealthKey(sourceType, sourceId, streamId) {
+        if (!sourceType || !sourceId || !streamId) return null;
+        return `${sourceType}:${sourceId}:${streamId}`;
+    }
+
+    getHealthKeyForChannel(channel) {
+        const streamId = channel?.streamId || channel?.id;
+        return this.getHealthKey(channel?.sourceType, channel?.sourceId, streamId);
+    }
+
+    applyHealthClass(element, ok) {
+        if (!element) return;
+        if (ok === false) {
+            element.classList.add('is-offline');
+        } else {
+            element.classList.remove('is-offline');
+        }
+    }
+
+    updateHealthStatus(key, ok) {
+        if (!key) return;
+        this.healthStatus.set(key, { ok, checkedAt: Date.now() });
+
+        const [sourceType, sourceId, streamId] = key.split(':');
+        const selector = `.channel-item[data-source-type="${sourceType}"][data-source-id="${sourceId}"][data-stream-id="${streamId}"]`;
+        this.container.querySelectorAll(selector).forEach(el => this.applyHealthClass(el, ok));
+    }
+
+    queueHealthCheckFromChannel(channel, force = false) {
+        const key = this.getHealthKeyForChannel(channel);
+        if (!key) return;
+
+        const cached = this.healthStatus.get(key);
+        if (!force && cached && (Date.now() - cached.checkedAt) < this.healthCacheTtlMs) {
+            return;
+        }
+
+        if (this.healthCheckInFlight.has(key)) return;
+
+        this.healthCheckQueue.push({
+            key,
+            sourceType: channel.sourceType,
+            sourceId: channel.sourceId,
+            streamId: channel.streamId || channel.id
+        });
+        this.scheduleHealthQueueDrain();
+    }
+
+    queueHealthCheckFromDataset(dataset, force = false) {
+        const sourceType = dataset.sourceType;
+        const sourceId = dataset.sourceId;
+        const streamId = dataset.streamId || dataset.channelId;
+        const key = this.getHealthKey(sourceType, sourceId, streamId);
+        if (!key) return;
+
+        const cached = this.healthStatus.get(key);
+        if (!force && cached && (Date.now() - cached.checkedAt) < this.healthCacheTtlMs) {
+            return;
+        }
+
+        if (this.healthCheckInFlight.has(key)) return;
+
+        this.healthCheckQueue.push({
+            key,
+            sourceType,
+            sourceId,
+            streamId
+        });
+        this.scheduleHealthQueueDrain();
+    }
+
+    queueHealthChecks(channels = []) {
+        channels.forEach(channel => this.queueHealthCheckFromChannel(channel));
+    }
+
+    checkHealthForRenderedChannels() {
+        const items = this.container.querySelectorAll('.channel-item');
+        items.forEach(item => this.queueHealthCheckFromDataset(item.dataset));
+    }
+
+    scheduleHealthQueueDrain() {
+        if (this.healthCheckDrainScheduled) return;
+        this.healthCheckDrainScheduled = true;
+        setTimeout(() => {
+            this.healthCheckDrainScheduled = false;
+            this.drainHealthQueue();
+        }, 0);
+    }
+
+    drainHealthQueue() {
+        while (this.healthCheckQueue.length > 0 && this.healthCheckInFlight.size < this.maxConcurrentHealthChecks) {
+            const item = this.healthCheckQueue.shift();
+            if (!item) return;
+            this.healthCheckInFlight.add(item.key);
+
+            this.runHealthCheck(item)
+                .catch(() => this.updateHealthStatus(item.key, false))
+                .finally(() => {
+                    this.healthCheckInFlight.delete(item.key);
+                    if (this.healthCheckQueue.length > 0) {
+                        this.scheduleHealthQueueDrain();
+                    }
+                });
+        }
+    }
+
+    async runHealthCheck(item) {
+        const container = window.app?.player?.settings?.streamFormat || 'm3u8';
+        const result = await API.health.checkStream({
+            sourceType: item.sourceType,
+            sourceId: item.sourceId,
+            streamId: item.streamId,
+            container
+        });
+
+        this.updateHealthStatus(item.key, !!result?.ok);
     }
 
     escapeHtml(text) {
@@ -496,12 +635,15 @@ class ChannelList {
                 const isRenderActive = this.currentRenderId && this.renderedChannels[renderIndex]?._renderId === this.currentRenderId;
 
                 const isFavorite = this.isFavorite(channel.sourceId, channel.id);
+                const healthKey = this.getHealthKeyForChannel(channel);
+                const healthState = healthKey ? this.healthStatus.get(healthKey) : null;
+                const isOffline = healthState && healthState.ok === false;
                 const renderId = this.renderedChannels[renderIndex]?._renderId || '';
                 const renderGroup = this.renderedChannels[renderIndex]?._renderGroup || groupName;
                 renderIndex++;
 
                 html += `
-          <div class="channel-item ${isActive ? 'active' : ''} ${isRenderActive ? 'nav-active' : ''} ${channelHidden ? 'hidden' : ''}" 
+            <div class="channel-item ${isActive ? 'active' : ''} ${isRenderActive ? 'nav-active' : ''} ${channelHidden ? 'hidden' : ''} ${isOffline ? 'is-offline' : ''}" 
                data-channel-id="${channel.id}"
                data-source-id="${channel.sourceId}"
                data-source-type="${channel.sourceType}"
@@ -522,6 +664,10 @@ class ChannelList {
         `;
             }
             html += '</div></div>';
+
+            if (!this.collapsedGroups.has(groupName)) {
+                this.queueHealthChecks(visibleChannels);
+            }
         }
 
         // Append to list container
@@ -605,6 +751,9 @@ class ChannelList {
             const channelHidden = !isFavoritesGroup && this.isHidden('channel', channel.sourceId, rawChannelId);
             const isActive = this.currentChannel?.id === channel.id;
             const isFavorite = this.isFavorite(channel.sourceId, channel.id);
+            const healthKey = this.getHealthKeyForChannel(channel);
+            const healthState = healthKey ? this.healthStatus.get(healthKey) : null;
+            const isOffline = healthState && healthState.ok === false;
 
             // Find the matching rendered channel to get its unique IDs
             const renderedChannel = this.renderedChannels.find(rc =>
@@ -614,7 +763,7 @@ class ChannelList {
             const renderGroup = renderedChannel?._renderGroup || groupName;
 
             html += `
-          <div class="channel-item ${isActive ? 'active' : ''} ${channelHidden ? 'hidden' : ''}" 
+        <div class="channel-item ${isActive ? 'active' : ''} ${channelHidden ? 'hidden' : ''} ${isOffline ? 'is-offline' : ''}" 
                data-channel-id="${channel.id}"
                data-source-id="${channel.sourceId}"
                data-source-type="${channel.sourceType}"
@@ -653,6 +802,8 @@ class ChannelList {
                 });
             }
         });
+
+        this.queueHealthChecks(visibleChannels);
     }
 
     /**
@@ -1179,6 +1330,8 @@ class ChannelList {
         if (window.app?.player) {
             window.app.player.play(channel, streamUrl);
         }
+
+        this.queueHealthCheckFromChannel(channel, true);
     }
 
     /**

@@ -11,7 +11,7 @@ const { Strategy: LocalStrategy } = require('passport-local');
  */
 
 // JWT Secret - In production, use environment variable
-const JWT_SECRET = process.env.JWT_SECRET || 'nodecast-tv-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'manyak-secret-key-change-in-production';
 const JWT_EXPIRY = '24h';
 
 /**
@@ -32,16 +32,19 @@ async function verifyPassword(password, hash) {
 /**
  * Generate JWT token
  */
-function generateToken(user) {
-    return jwt.sign(
-        {
-            id: user.id,
-            username: user.username,
-            role: user.role
-        },
-        JWT_SECRET,
-        { expiresIn: JWT_EXPIRY }
-    );
+function generateToken(user, sessionId = null) {
+    const resolvedSessionId = sessionId || user.sessionId || null;
+    const payload = {
+        id: user.id,
+        username: user.username,
+        role: user.role
+    };
+
+    if (resolvedSessionId) {
+        payload.sessionId = resolvedSessionId;
+    }
+
+    return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY });
 }
 
 /**
@@ -96,6 +99,14 @@ function configureJwtStrategy(getUserById) {
             const user = await getUserById(payload.id);
 
             if (!user) {
+                return done(null, false);
+            }
+
+            if (user.approved === false) {
+                return done(null, false);
+            }
+
+            if (user.sessionId && payload.sessionId !== user.sessionId) {
                 return done(null, false);
             }
 

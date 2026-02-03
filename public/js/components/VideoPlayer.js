@@ -71,7 +71,7 @@ class VideoPlayer {
             console.warn('[Player] Failed to load settings from server, using defaults:', err.message);
             // Fall back to localStorage for backwards compatibility
             try {
-                const saved = localStorage.getItem('nodecast_tv_player_settings');
+                const saved = localStorage.getItem('manyak_player_settings');
                 if (saved) {
                     this.settings = { ...this.getDefaultSettings(), ...JSON.parse(saved) };
                     console.log('[Player] Settings loaded from localStorage (fallback)');
@@ -93,7 +93,7 @@ class VideoPlayer {
             console.error('[Player] Error saving settings to server:', err);
             // Also save to localStorage as backup
             try {
-                localStorage.setItem('nodecast_tv_player_settings', JSON.stringify(this.settings));
+                localStorage.setItem('manyak_player_settings', JSON.stringify(this.settings));
             } catch (localErr) {
                 console.error('[Player] Error saving to localStorage:', localErr);
             }
@@ -624,6 +624,11 @@ class VideoPlayer {
             }
         });
 
+        // Detect playback errors to trigger immediate health checks
+        this.video.addEventListener('error', () => {
+            window.app?.channelList?.queueHealthCheckFromChannel?.(this.currentChannel, true);
+        });
+
         // Initialize HLS.js if supported
         if (Hls.isSupported()) {
             this.hls = new Hls(this.getHlsConfig());
@@ -634,6 +639,7 @@ class VideoPlayer {
                 if (data.fatal) {
                     switch (data.type) {
                         case Hls.ErrorTypes.NETWORK_ERROR:
+                            window.app?.channelList?.queueHealthCheckFromChannel?.(this.currentChannel, true);
                             // Track network retry attempts
                             this.networkRetryCount = (this.networkRetryCount || 0) + 1;
                             const now = Date.now();

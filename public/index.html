@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
-  <title>nodecast-tv | IPTV Player</title>
+  <title>manyak</title>
   <meta name="description" content="Stream live TV, movies, and series with EPG support">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="css/main.css">
@@ -79,6 +79,7 @@
                 d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L3.16 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.04.64.09.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.58 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
             </svg></span>
           <span>Settings</span>
+          <span class="notification-dot hidden" id="settings-notification-dot"></span>
         </a>
       </div>
     </nav>
@@ -206,6 +207,17 @@
                         <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                       </svg>
                     </button>
+
+                    <div class="pass-status" id="player-pass-status">
+                      <div class="pass-status-row">
+                        <span class="pass-label">Restlaufzeit</span>
+                        <span class="pass-value" id="player-pass-remaining">—</span>
+                      </div>
+                      <div class="pass-status-row">
+                        <span class="pass-label">Gültig bis</span>
+                        <span class="pass-value" id="player-pass-until">—</span>
+                      </div>
+                    </div>
 
                     <div class="watch-spacer"></div>
 
@@ -336,6 +348,7 @@
           <div class="account-card">
             <h3>Verfügbare Coins</h3>
             <div class="account-coins" id="account-coins">0</div>
+            <p class="hint" id="account-contact-note"></p>
           </div>
 
           <div class="account-card">
@@ -347,6 +360,19 @@
               <button class="btn btn-secondary pass-option" data-plan="30d">30 Tage <span>5 Coins</span></button>
             </div>
             <p class="hint" id="account-pass-hint"> </p>
+          </div>
+
+          <div class="account-card">
+            <h3>Freunde einladen</h3>
+            <p class="hint">Einladungslink ist 24 Stunden gültig und nur einmal nutzbar.</p>
+            <div class="invite-actions">
+              <button class="btn btn-primary" id="invite-generate-btn">Einladungslink erzeugen</button>
+              <button class="btn btn-secondary" id="invite-copy-btn" disabled>Link kopieren</button>
+            </div>
+            <div class="invite-link" id="invite-link" hidden>
+              <input type="text" id="invite-link-input" class="form-input" readonly>
+              <div class="invite-meta" id="invite-link-meta"></div>
+            </div>
           </div>
 
           <div class="account-card">
@@ -460,7 +486,8 @@
             <button class="tab" data-tab="player">Player</button>
             <button class="tab" data-tab="transcode">Transcoding</button>
             <button class="tab" data-tab="content">Manage Content</button>
-            <button class="tab" data-tab="users" id="users-tab" style="display:none;">Users</button>
+            <button class="tab" data-tab="users" id="users-tab" style="display:none;">Users<span class="notification-dot hidden" id="users-tab-dot"></span></button>
+            <button class="tab" data-tab="contact" id="contact-tab" style="display:none;">Kontakt</button>
           </div>
 
           <!-- Sources Tab -->
@@ -476,7 +503,10 @@
             <div class="source-section">
               <div class="section-header">
                 <h3>M3U Playlists</h3>
-                <button class="btn btn-primary" id="add-m3u">+ Add M3U</button>
+                <div class="btn-group">
+                  <button class="btn btn-primary" id="add-m3u">+ Add M3U</button>
+                  <button class="btn btn-secondary" id="add-m3u-upload">+ Upload M3U</button>
+                </div>
               </div>
               <div id="m3u-list" class="source-list"></div>
             </div>
@@ -733,7 +763,7 @@
                 </label>
                 <div class="setting-info">
                   <span class="setting-label">Force Remux</span>
-                  <span class="setting-hint">Remux streams to MP4 container. Enable for raw .ts streams from IPTV
+                  <span class="setting-hint">Remux streams to MP4 container. Enable for raw .ts streams from
                     middleware like m3u-editor or dispatcharr.</span>
                 </div>
               </div>
@@ -874,6 +904,20 @@
                   <button type="submit" class="btn btn-primary">Add User</button>
                 </form>
               </div>
+            </div>
+          </div>
+
+          <div id="tab-contact" class="tab-content">
+            <div class="settings-section">
+              <h3>Kontakt</h3>
+              <p class="hint">Diese Angaben werden im Account‑Bereich aller Nutzer angezeigt.</p>
+
+              <div class="form-group">
+                <label for="contact-note">Hinweistext</label>
+                <textarea id="contact-note" class="form-input" rows="3" placeholder="Aufladen per WhatsApp/Telegram/Signal"></textarea>
+              </div>
+
+              <button class="btn btn-primary" id="contact-save">Speichern</button>
             </div>
           </div>
         </div>
@@ -1126,8 +1170,8 @@
           </div>
 
           <div class="modal-form-group">
-            <label for="edit-email">Email</label>
-            <input type="text" id="edit-email" class="form-input" readonly disabled placeholder="No email associated">
+            <label for="edit-invited-by">Eingeladen von</label>
+            <input type="text" id="edit-invited-by" class="form-input" readonly disabled placeholder="-">
           </div>
 
           <div class="modal-form-group">
